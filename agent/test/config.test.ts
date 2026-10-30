@@ -11,7 +11,7 @@ function workspace(overrides: Partial<WorkspaceConfigInput> = {}): WorkspaceConf
     sources: ['src/**/*.ts'],
     tests: ['tests/**/*.test.ts'],
     writable: ['tests/**'],
-    commands: { install: ['npm ci --ignore-scripts'], typecheck: 'npx tsc --noEmit', test: 'npx vitest run' },
+    commands: { install: ['npm ci --ignore-scripts'], typecheck: 'node_modules/.bin/tsc --noEmit', test: 'node_modules/.bin/vitest run' },
     ...overrides,
   };
 }
@@ -47,5 +47,13 @@ describe('configSchema', () => {
 
   it('rejects workspace names that are not lowercase identifiers', () => {
     expect(() => configSchema.parse({ workspaces: { 'Back End': workspace() } })).toThrow(/lowercase name/);
+  });
+
+  it('rejects skill names that could point outside the skills directory', () => {
+    expect(() => configSchema.parse({ workspaces: { backend: workspace({ skill: '../../etc' }) } })).toThrow(/lowercase name/);
+  });
+
+  it('rejects unknown keys, so a typo does not silently fall back to a default', () => {
+    expect(() => configSchema.parse({ workspaces: { backend: workspace() }, flakyRerun: 3 })).toThrow(/flakyRerun/);
   });
 });
