@@ -47,6 +47,25 @@ export async function assertRegularFile(filePath: string, relativePath: string) 
   return stats;
 }
 
+function isMissing(error: NodeJS.ErrnoException) {
+  return error.code === 'ENOENT';
+}
+
+// A checkout of a pull request is controlled by its author, so a link anywhere on the destination path could redirect a write.
+export async function assertNoLinksOnPath(root: string, relativePath: string) {
+  const segments = relativePath.split('/');
+  for (let index = 1; index <= segments.length; index += 1) {
+    const partialPath = segments.slice(0, index).join('/');
+    const stats = await lstat(path.join(root, partialPath)).catch((error: NodeJS.ErrnoException) => {
+      if (isMissing(error)) return undefined;
+      throw error;
+    });
+    if (!stats) return;
+    if (stats.isSymbolicLink()) throw new SymbolicLinkError(partialPath);
+    if (index === segments.length && !stats.isFile()) throw new Error(`Not a regular file: ${relativePath}`);
+  }
+}
+
 export async function copyRegularFiles(sourceRoot: string, destinationRoot: string, relativePaths: string[]) {
   for (const relativePath of relativePaths) {
     const sourcePath = path.join(sourceRoot, relativePath);

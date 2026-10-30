@@ -1,6 +1,6 @@
 import { lstat, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { copyRegularFiles } from './files.ts';
+import { assertNoLinksOnPath, copyRegularFiles } from './files.ts';
 import type { StagingChanges } from './staging.ts';
 
 function toWorkspaceRelative(workspaceRoot: string, repositoryPaths: string[]) {
@@ -27,6 +27,7 @@ export async function syncStagingToRunner(staging: string, runnerDirectory: stri
 }
 
 export async function applyStagingToRepository(staging: string, repositoryRoot: string, changes: StagingChanges) {
+  for (const changedPath of [...changes.added, ...changes.modified, ...changes.deleted]) await assertNoLinksOnPath(repositoryRoot, changedPath);
   await copyRegularFiles(staging, repositoryRoot, [...changes.added, ...changes.modified]);
   for (const deletedPath of changes.deleted) {
     await rm(path.join(repositoryRoot, deletedPath), { force: true });
