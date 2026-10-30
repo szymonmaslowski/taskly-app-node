@@ -36,6 +36,8 @@ function stageSchema(stage: StageName) {
   return z
     .strictObject({
       agent: lowercaseName.default(defaults.agent),
+      skills: z.array(lowercaseName).default(defaults.skills),
+      workspaceReference: z.string().regex(/^[a-z][a-z0-9-]*\.md$/, 'must be a markdown file name').default(defaults.workspaceReference),
       model: z.string().min(1).default(defaults.model),
       effort: z.enum(stageEfforts).default(defaults.effort),
       maxTurns: z.number().int().positive().max(stageCaps.maxTurns).default(defaults.maxTurns),

@@ -18,7 +18,13 @@ const usage = { model: 'claude-sonnet-5-5', inputTokens: 100, outputTokens: 20, 
 
 const result: WorkspaceResult = {
   name: 'backend',
-  skill: 'backend-unit-tests',
+  skillsByStage: {
+    plan: ['unit-test-principles', 'unit-test-planning', 'backend-unit-tests', 'backend-unit-tests/planning.md'],
+    planReview: ['unit-test-principles', 'unit-test-reviewing', 'backend-unit-tests', 'backend-unit-tests/planning.md'],
+    write: ['unit-test-principles', 'unit-test-writing', 'backend-unit-tests', 'backend-unit-tests/writing.md'],
+    fix: ['unit-test-principles', 'unit-test-writing', 'reading-test-results', 'backend-unit-tests', 'backend-unit-tests/writing.md'],
+    lastFix: ['unit-test-principles', 'unit-test-writing', 'reading-test-results', 'backend-unit-tests', 'backend-unit-tests/writing.md'],
+  },
   coverageBefore: new Map([['backend/src/api/health.ts', coverage(0, 0)]]),
   coverageAfter: new Map([['backend/src/api/health.ts', coverage(10, 4)]]),
   verify: { typecheckPassed: true, testsPassed: 50, testsFailed: 0, repositoryThresholds: 'met' },
@@ -28,8 +34,8 @@ const result: WorkspaceResult = {
     {
       module: 'backend/src/api',
       decisions: [
-        { id: 'c1', name: 'reports ok', behaviour: 'b', reason: 'r', overlap: 'none', updatesExistingTest: false, sourceFile: 'backend/src/api/health.ts', testFile: 'backend/tests/health.test.ts', verdict: 'keep', verdictReason: 'ok', reviewed: true },
-        { id: 'c2', name: 'checks the query', behaviour: 'b', reason: 'r', overlap: 'none', updatesExistingTest: false, sourceFile: 'backend/src/api/health.ts', testFile: 'backend/tests/health.test.ts', verdict: 'drop', verdictReason: 'Only asserts a mock call.', reviewed: true },
+        { id: 'c1', name: 'reports ok', behaviour: 'b', catches: 'a bug', reason: 'r', overlap: 'none', updatesExistingTest: false, sourceFile: 'backend/src/api/health.ts', testFile: 'backend/tests/health.test.ts', verdict: 'keep', verdictReason: 'ok', reviewed: true },
+        { id: 'c2', name: 'checks the query', behaviour: 'b', catches: 'a bug', reason: 'r', overlap: 'none', updatesExistingTest: false, sourceFile: 'backend/src/api/health.ts', testFile: 'backend/tests/health.test.ts', verdict: 'drop', verdictReason: 'Only asserts a mock call.', reviewed: true },
       ],
       rejectedCases: [],
       skipped: [],
@@ -90,9 +96,9 @@ describe('buildRunReport', () => {
   });
 
   it('lists the skills of the stages that ran', () => {
-    expect(buildRunReport([result]).workspaces[0].skillsUsed).toEqual(['backend-unit-tests']);
+    expect(buildRunReport([result]).workspaces[0].skillsUsed).toEqual(['unit-test-principles', 'unit-test-planning', 'backend-unit-tests', 'unit-test-reviewing', 'unit-test-writing']);
     const fixed: WorkspaceResult = { ...result, batches: [{ ...result.batches[0], fixAttempts: 1 }] };
-    expect(buildRunReport([fixed]).workspaces[0].skillsUsed).toEqual(['backend-unit-tests', 'reading-test-results']);
+    expect(buildRunReport([fixed]).workspaces[0].skillsUsed).toContain('reading-test-results');
   });
 
   it('flags test files changed outside their cases, shared ones loudest', () => {

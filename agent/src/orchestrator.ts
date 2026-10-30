@@ -16,7 +16,7 @@ import { checkRepositoryThresholds, installRunnerWorkspace, prepareRunnerWorkspa
 import { createStagingCopy, diffStagingCopy, findDisallowedChanges, type StagingChanges, type StagingManifest } from './sandbox/staging.ts';
 import { applyStagingToRepository, syncStagingToRunner } from './sandbox/sync.ts';
 import type { TestCaseResult } from './sandbox/test-results.ts';
-import { loadSkill, type Skill } from './skills.ts';
+import { loadSkill, loadSkillReference, type Skill } from './skills.ts';
 import { applyReview, numberCases, partitionPlannedCases, type CaseDecision } from './stages/plan.ts';
 import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt, type FileFailures } from './stages/prompts.ts';
 import { fixOutputSchema, planOutputSchema, reviewOutputSchema, writeOutputSchema, type PlannedCase } from './stages/schemas.ts';
@@ -34,8 +34,7 @@ type WorkspaceContext = {
   knownFiles: Set<string>;
   testedFilesByTest: Map<string, string[]>;
   workspace: WorkspaceConfig;
-  skill: Skill;
-  readingSkill: Skill;
+  skills: Record<StageName, Skill[]>;
   agents: StageAgents;
   stages: Record<StageName, StageConfig>;
   loop: LoopConfig;
@@ -80,7 +79,7 @@ export type VerifyResult = {
 
 export type WorkspaceResult = {
   name: string;
-  skill: string;
+  skillsByStage: Record<StageName, string[]>;
   coverageBefore: CoverageByFile;
   coverageAfter: CoverageByFile;
   verify: VerifyResult;
@@ -250,7 +249,7 @@ async function selectBatchTestRun(context: WorkspaceContext, batchStart: BatchSn
 }
 
 async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
-  const { logger, agents, skill, workspace } = context;
+  const { logger, skills, workspace } = context;
   const isWritable = createMatcher(workspace.root, workspace.writable);
   const sourceFiles = new Set(batch.items.map((item) => item.sourceFile));
   const decisions: CaseDecision[] = [];
@@ -264,7 +263,7 @@ async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
     logger.startStep(`plan · ${batch.module} · round ${round}`);
     const plan = await runContextStage(context, {
       stage: 'plan',
-      prompt: buildPlanPrompt({ skill, workItems: batch.items, missingBehaviours, approvedCases }),
+      prompt: buildPlanPrompt({ skills: skills.plan, workItems: batch.items, missingBehaviours, approvedCases }),
       outputSchema: planOutputSchema,
     });
     const numberedCases = numberCases(plan, firstCaseNumber);
@@ -279,7 +278,7 @@ async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
     logger.startStep(`plan-review · ${batch.module} · round ${round}`);
     const review = await runContextStage(context, {
       stage: 'planReview',
-      prompt: buildReviewPrompt({ skill, workItems: batch.items, cases: accepted, approvedCases }),
+      prompt: buildReviewPrompt({ skills: skills.planReview, workItems: batch.items, cases: accepted, approvedCases }),
       outputSchema: reviewOutputSchema,
     });
     const roundDecisions = applyReview(accepted, review);
@@ -296,7 +295,7 @@ async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
 }
 
 async function fixFailures(context: WorkspaceContext, batchStart: BatchSnapshot, cases: PlannedCase[], initialFailures: FileFailures[]) {
-  const { logger, agents, skill, readingSkill } = context;
+  const { logger, skills } = context;
   let failures = initialFailures;
   let attempt = 0;
   const notes: string[] = [];
@@ -311,8 +310,7 @@ async function fixFailures(context: WorkspaceContext, batchStart: BatchSnapshot,
       const fixResult = await runContextStage(fixerContext, {
         stage: isLastAttempt ? 'lastFix' : 'fix',
         prompt: buildFixPrompt({
-          skill,
-          readingSkill,
+          skills: isLastAttempt ? skills.lastFix : skills.fix,
           failures: fileFailures,
           cases: cases.filter((plannedCase) => plannedCase.testFile === fileFailures.testFile),
           attempt,
@@ -444,7 +442,7 @@ async function processBatch(context: WorkspaceContext, batch: WorkBatch, batchSt
   context.logger.startStep(`write · ${batch.module}`);
   const written = await runContextStage(context, {
     stage: 'write',
-    prompt: buildWritePrompt({ skill: context.skill, cases: keptCases }),
+    prompt: buildWritePrompt({ skills: context.skills.write, cases: keptCases }),
     outputSchema: writeOutputSchema,
   });
   await checkStagingChanges(context);
@@ -515,6 +513,24 @@ async function loadStageAgents(trustedRepositoryRoot: string, stages: Record<Sta
   };
 }
 
+async function loadSkillsForStage(trustedRepositoryRoot: string, stage: StageConfig, workspaceSkill: string) {
+  return Promise.all([
+    ...stage.skills.map((name) => loadSkill(trustedRepositoryRoot, name)),
+    loadSkill(trustedRepositoryRoot, workspaceSkill),
+    loadSkillReference(trustedRepositoryRoot, workspaceSkill, stage.workspaceReference),
+  ]);
+}
+
+async function loadStageSkills(trustedRepositoryRoot: string, stages: Record<StageName, StageConfig>, workspaceSkill: string) {
+  return {
+    plan: await loadSkillsForStage(trustedRepositoryRoot, stages.plan, workspaceSkill),
+    planReview: await loadSkillsForStage(trustedRepositoryRoot, stages.planReview, workspaceSkill),
+    write: await loadSkillsForStage(trustedRepositoryRoot, stages.write, workspaceSkill),
+    fix: await loadSkillsForStage(trustedRepositoryRoot, stages.fix, workspaceSkill),
+    lastFix: await loadSkillsForStage(trustedRepositoryRoot, stages.lastFix, workspaceSkill),
+  } satisfies Record<StageName, Skill[]>;
+}
+
 type RunRepositoryModeOptions = {
   repositoryRoot: string;
   logger: Logger;
@@ -529,7 +545,6 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
   await buildImages(repositoryRoot);
   const trackedFiles = await listTrackedFiles(repositoryRoot);
   const agents = await loadStageAgents(repositoryRoot, config.stages);
-  const readingSkill = await loadSkill(repositoryRoot, 'reading-test-results');
   const runId = new Date().toISOString().replace(/[:.]/g, '-');
   const transcriptDirectory = path.join(repositoryRoot, '.testeragent', 'runs', runId);
   await mkdir(transcriptDirectory, { recursive: true });
@@ -563,8 +578,7 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
         knownFiles: new Set(trackedFiles),
         testedFilesByTest: new Map(),
         workspace,
-        skill: await loadSkill(repositoryRoot, workspace.skill),
-        readingSkill,
+        skills: await loadStageSkills(repositoryRoot, config.stages, workspace.skill),
         agents,
         stages: config.stages,
         loop: config.loop,
@@ -606,7 +620,13 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
       else logger.info(`${name}: verify failed, so the changes were not applied`);
       results.push({
         name,
-        skill: workspace.skill,
+        skillsByStage: {
+          plan: context.skills.plan.map((skill) => skill.name),
+          planReview: context.skills.planReview.map((skill) => skill.name),
+          write: context.skills.write.map((skill) => skill.name),
+          fix: context.skills.fix.map((skill) => skill.name),
+          lastFix: context.skills.lastFix.map((skill) => skill.name),
+        },
         coverageBefore: coverage,
         coverageAfter: after.coverage,
         verify,

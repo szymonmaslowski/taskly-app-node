@@ -18,6 +18,16 @@ describe('repository agent definitions', () => {
 });
 
 describe('repository stage configuration', () => {
+  it('points every stage at skills and a workspace reference that exist', async () => {
+    const config = await loadConfig(repositoryRoot);
+    for (const stage of Object.values(config.stages)) {
+      for (const name of stage.skills) expect((await loadSkill(repositoryRoot, name)).instructions).not.toBe('');
+      for (const workspace of Object.values(config.workspaces)) {
+        expect((await loadSkillReference(repositoryRoot, workspace.skill, stage.workspaceReference)).instructions).not.toBe('');
+      }
+    }
+  });
+
   it('points every stage at an agent file that exists', async () => {
     const config = await loadConfig(repositoryRoot);
     for (const stage of Object.values(config.stages)) {

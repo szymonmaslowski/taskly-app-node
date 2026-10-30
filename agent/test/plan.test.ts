@@ -7,14 +7,14 @@ const plan = {
       sourceFile: 'backend/src/api/health.ts',
       testFile: 'backend/tests/health.test.ts',
       cases: [
-        { name: 'reports ok', behaviour: 'returns status ok', reason: 'happy path', overlap: 'none', updatesExistingTest: false },
-        { name: 'propagates errors', behaviour: 'fails when the database fails', reason: 'error path', overlap: 'none', updatesExistingTest: false },
+        { name: 'reports ok', behaviour: 'returns status ok', catches: 'a bug', reason: 'happy path', overlap: 'none', updatesExistingTest: false },
+        { name: 'propagates errors', behaviour: 'fails when the database fails', catches: 'a bug', reason: 'error path', overlap: 'none', updatesExistingTest: false },
       ],
     },
     {
       sourceFile: 'backend/src/factory.ts',
       testFile: 'backend/src/factory.test.ts',
-      cases: [{ name: 'serves docs', behaviour: 'serves the spec', reason: 'contract', overlap: 'none', updatesExistingTest: false }],
+      cases: [{ name: 'serves docs', behaviour: 'serves the spec', catches: 'a bug', reason: 'contract', overlap: 'none', updatesExistingTest: false }],
     },
   ],
   skipped: [],

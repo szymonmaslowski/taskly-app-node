@@ -23,6 +23,16 @@ function section(title: string, body: string) {
   return `## ${title}\n\n${body}`;
 }
 
+function skillsSection(skills: Skill[]) {
+  return section(
+    'Skills',
+    [
+      'The references this task needs are included below. The other files the skills link to are not needed here.',
+      ...skills.map((skill) => `### ${skill.name}\n\n${skill.instructions}`),
+    ].join('\n\n'),
+  );
+}
+
 function jsonBlock(value: object) {
   return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
 }
@@ -51,6 +61,7 @@ function describeCase(plannedCase: PlannedCase) {
     testFile: plannedCase.testFile,
     name: plannedCase.name,
     behaviour: plannedCase.behaviour,
+    catches: plannedCase.catches,
     reason: plannedCase.reason,
     overlap: plannedCase.overlap,
     updatesExistingTest: plannedCase.updatesExistingTest,
@@ -66,19 +77,19 @@ function truncate(text: string) {
 }
 
 type PlanPromptOptions = {
-  skill: Skill;
+  skills: Skill[];
   workItems: WorkItem[];
   missingBehaviours?: { sourceFile: string; behaviour: string; reason: string }[];
   approvedCases?: PlannedCase[];
 };
 
-export function buildPlanPrompt({ skill, workItems, missingBehaviours = [], approvedCases = [] }: PlanPromptOptions) {
+export function buildPlanPrompt({ skills, workItems, missingBehaviours = [], approvedCases = [] }: PlanPromptOptions) {
   const isFollowUp = missingBehaviours.length > 0;
   const sections = [
     isFollowUp
       ? 'Add unit test cases for the behaviours a reviewer found missing from an approved plan. All paths are relative to your working directory.'
       : 'Plan unit tests for the source files below. All paths are relative to your working directory.',
-    section('Conventions for this workspace', skill.instructions),
+    skillsSection(skills),
     section('Work items', jsonBlock(workItems.map(describeWorkItem))),
   ];
   if (isFollowUp) {
@@ -99,16 +110,16 @@ export function buildPlanPrompt({ skill, workItems, missingBehaviours = [], appr
 }
 
 type ReviewPromptOptions = {
-  skill: Skill;
+  skills: Skill[];
   workItems: WorkItem[];
   cases: PlannedCase[];
   approvedCases?: PlannedCase[];
 };
 
-export function buildReviewPrompt({ skill, workItems, cases, approvedCases = [] }: ReviewPromptOptions) {
+export function buildReviewPrompt({ skills, workItems, cases, approvedCases = [] }: ReviewPromptOptions) {
   const sections = [
     'Review this unit test plan. All paths are relative to your working directory.',
-    section('Conventions for this workspace', skill.instructions),
+    skillsSection(skills),
     section('Source files and their existing tests', jsonBlock(workItems.map(describeWorkItem))),
   ];
   if (approvedCases.length > 0) {
@@ -125,29 +136,28 @@ export function buildReviewPrompt({ skill, workItems, cases, approvedCases = [] 
 }
 
 type WritePromptOptions = {
-  skill: Skill;
+  skills: Skill[];
   cases: PlannedCase[];
 };
 
-export function buildWritePrompt({ skill, cases }: WritePromptOptions) {
+export function buildWritePrompt({ skills, cases }: WritePromptOptions) {
   return [
     'Write these approved unit test cases. All paths are relative to your working directory.',
-    section('Conventions for this workspace', skill.instructions),
+    skillsSection(skills),
     section('Approved cases', jsonBlock(cases.map(describeCase))),
     section('Output', 'Return every test file you wrote or changed, with the ids of the cases it now contains.'),
   ].join('\n\n');
 }
 
 type FixPromptOptions = {
-  skill: Skill;
-  readingSkill: Skill;
+  skills: Skill[];
   failures: FileFailures;
   cases: PlannedCase[];
   attempt: number;
   maxAttempts: number;
 };
 
-export function buildFixPrompt({ skill, readingSkill, failures, cases, attempt, maxAttempts }: FixPromptOptions) {
+export function buildFixPrompt({ skills, failures, cases, attempt, maxAttempts }: FixPromptOptions) {
   const typecheckErrors = limitList(failures.typecheckErrors, maxTypecheckErrorsInPrompt);
   const failingCases = limitList(failures.failingCases, maxFailingCasesInPrompt);
   const report = {
@@ -164,8 +174,7 @@ export function buildFixPrompt({ skill, readingSkill, failures, cases, attempt, 
   };
   return [
     `Fix the failing tests in ${failures.testFile}. This is attempt ${attempt} of ${maxAttempts}. All paths are relative to your working directory.`,
-    section('Conventions for this workspace', skill.instructions),
-    section('How to read the failures', readingSkill.instructions),
+    skillsSection(skills),
     section('The cases this file is meant to contain', jsonBlock(cases.map(describeCase))),
     section('Failures', jsonBlock(report)),
     section('Output', 'Return the test files you changed, and notes on anything you couldn\'t fix or chose not to change.'),

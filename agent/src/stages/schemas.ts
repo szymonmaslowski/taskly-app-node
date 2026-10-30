@@ -3,6 +3,7 @@ import { z } from 'zod';
 const plannedCaseSchema = z.object({
   name: z.string().min(1),
   behaviour: z.string().min(1),
+  catches: z.string().min(1),
   reason: z.string().min(1),
   overlap: z.string().min(1),
   updatesExistingTest: z.boolean(),

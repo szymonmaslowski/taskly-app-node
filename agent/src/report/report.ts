@@ -100,7 +100,9 @@ function changedSourceFiles(result: WorkspaceResult) {
 function usedSkills(result: WorkspaceResult) {
   if (result.batches.length === 0) return [];
   const fixerRan = result.batches.some((batch) => batch.fixAttempts > 0);
-  return fixerRan ? [result.skill, 'reading-test-results'] : [result.skill];
+  const { plan, planReview, write, fix, lastFix } = result.skillsByStage;
+  const skillNames = [...plan, ...planReview, ...write, ...(fixerRan ? [...fix, ...lastFix] : [])].map((name) => name.split('/')[0]);
+  return [...new Set(skillNames)];
 }
 
 export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {

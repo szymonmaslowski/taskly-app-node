@@ -62,6 +62,8 @@ describe('configSchema', () => {
       maxTurns: 20,
       timeoutMinutes: 10,
       maxBudgetUsd: 3,
+      skills: ['unit-test-principles', 'unit-test-reviewing'],
+      workspaceReference: 'planning.md',
     });
     expect(config.loop).toEqual({ planRounds: 2, outputAttempts: 2, fixAttempts: 4, agentParallelism: 1 });
   });
