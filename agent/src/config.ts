@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
+import { loopCaps, stageCaps, stageEfforts, type StageName } from './stages.ts';
 
 export const configFileName = 'testeragent.config.mts';
 
@@ -30,6 +31,21 @@ const workspaceSchema = z.strictObject({
   }),
 });
 
+const stageSchema = z.strictObject({
+  model: z.string().min(1),
+  effort: z.enum(stageEfforts),
+  maxTurns: z.number().int().positive().max(stageCaps.maxTurns),
+  timeoutMinutes: z.number().positive().max(stageCaps.timeoutMinutes),
+  maxBudgetUsd: z.number().positive().max(stageCaps.maxBudgetUsd),
+});
+
+const loopSchema = z.strictObject({
+  planRounds: z.number().int().min(1).max(loopCaps.planRounds),
+  outputAttempts: z.number().int().min(1).max(loopCaps.outputAttempts),
+  fixAttempts: z.number().int().min(0).max(loopCaps.fixAttempts),
+  agentParallelism: z.number().int().min(1).max(loopCaps.agentParallelism),
+});
+
 export const configSchema = z.strictObject({
   workspaces: z
     .record(lowercaseName, workspaceSchema)
@@ -41,10 +57,20 @@ export const configSchema = z.strictObject({
       maxChangedLines: z.number().int().positive().default(1500),
     })
     .prefault({}),
+  stages: z.strictObject({
+    plan: stageSchema,
+    planReview: stageSchema,
+    write: stageSchema,
+    fix: stageSchema,
+    lastFix: stageSchema,
+  }),
+  loop: loopSchema,
 });
 
 export type TesterAgentConfig = z.output<typeof configSchema>;
 export type WorkspaceConfig = TesterAgentConfig['workspaces'][string];
+export type StageConfig = TesterAgentConfig['stages'][StageName];
+export type LoopConfig = TesterAgentConfig['loop'];
 export type WorkspaceConfigInput = z.input<typeof workspaceSchema>;
 
 export function defineConfig(config: z.input<typeof configSchema>) {

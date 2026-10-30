@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 export type Logger = {
   startStep: (title: string) => void;
-  endStep: (summary: string) => void;
+  endStep: (summary: string, durationMilliseconds?: number) => void;
   info: (line: string) => void;
   untrusted: (line: string) => void;
 };
@@ -42,8 +42,9 @@ export function createLogger({ githubActions, write = (line) => process.stdout.w
       resumeCommands();
       write(githubActions ? `::group::${title}` : `▸ ${title}`);
     },
-    endStep(summary) {
-      const duration = stepStartedAt === undefined ? '' : ` (${formatDuration(now() - stepStartedAt)})`;
+    endStep(summary, durationMilliseconds) {
+      const elapsed = durationMilliseconds ?? (stepStartedAt === undefined ? undefined : now() - stepStartedAt);
+      const duration = elapsed === undefined ? '' : ` (${formatDuration(elapsed)})`;
       stepStartedAt = undefined;
       resumeCommands();
       write(`${indent}${summary}${duration}`);
@@ -56,6 +57,35 @@ export function createLogger({ githubActions, write = (line) => process.stdout.w
     untrusted(line) {
       stopCommands();
       write(`${indent}${line}`);
+    },
+  };
+}
+
+type LoggerCall =
+  | { method: 'startStep' | 'info' | 'untrusted'; text: string }
+  | { method: 'endStep'; text: string; durationMilliseconds: number };
+
+export function createBufferedLogger(now: () => number = Date.now) {
+  const calls: LoggerCall[] = [];
+  let stepStartedAt = now();
+  const logger: Logger = {
+    startStep(text) {
+      stepStartedAt = now();
+      calls.push({ method: 'startStep', text });
+    },
+    endStep(text) {
+      calls.push({ method: 'endStep', text, durationMilliseconds: now() - stepStartedAt });
+    },
+    info: (text) => calls.push({ method: 'info', text }),
+    untrusted: (text) => calls.push({ method: 'untrusted', text }),
+  };
+  return {
+    logger,
+    flush(target: Logger) {
+      for (const call of calls.splice(0)) {
+        if (call.method === 'endStep') target.endStep(call.text, call.durationMilliseconds);
+        else target[call.method](call.text);
+      }
     },
   };
 }

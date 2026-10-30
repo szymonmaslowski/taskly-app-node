@@ -176,3 +176,14 @@ export async function runTests({ workspaceDirectory, outputDirectory, workspace,
   }
   return { exitCode: result.exitCode, timedOut: result.timedOut, cases, fileErrors };
 }
+
+export async function checkRepositoryThresholds(workspaceDirectory: string, outputDirectory: string, workspace: WorkspaceConfig) {
+  const result = await runInRunner({
+    workspaceDirectory,
+    outputDirectory,
+    command: `${workspace.commands.test} --coverage.enabled=true`,
+    network: false,
+    timeoutMilliseconds: 600_000,
+  });
+  return result.exitCode === 0;
+}

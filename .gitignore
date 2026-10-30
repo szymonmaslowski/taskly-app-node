@@ -16,6 +16,9 @@ coverage/
 .env.example
 !.env.example
 
+# Test agent run transcripts
+.testeragent/
+
 # Logs
 *.log
 

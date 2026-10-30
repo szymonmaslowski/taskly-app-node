@@ -46,4 +46,19 @@ export default defineConfig({
       },
     },
   },
+  stages: {
+    plan: { model: 'claude-sonnet-5-5', effort: 'high', maxTurns: 15, timeoutMinutes: 10, maxBudgetUsd: 3 },
+    planReview: { model: 'claude-opus-5-5', effort: 'high', maxTurns: 12, timeoutMinutes: 10, maxBudgetUsd: 3 },
+    write: { model: 'claude-sonnet-5-5', effort: 'medium', maxTurns: 20, timeoutMinutes: 15, maxBudgetUsd: 4 },
+    fix: { model: 'claude-sonnet-5-5', effort: 'medium', maxTurns: 12, timeoutMinutes: 10, maxBudgetUsd: 3 },
+    lastFix: { model: 'claude-opus-5-5', effort: 'high', maxTurns: 15, timeoutMinutes: 12, maxBudgetUsd: 5 },
+  },
+  loop: {
+    planRounds: 2,
+    // One retry with the rejection reason fixes a malformed answer; a second failure means the task was misread.
+    outputAttempts: 2,
+    fixAttempts: 3,
+    // Fixers share one writable staging copy, so two of them could edit the same fixture at once.
+    agentParallelism: 1,
+  },
 });

@@ -1,0 +1,182 @@
+import type { WorkItem } from '../analyze/repository.ts';
+import type { Skill } from '../skills.ts';
+import type { PlannedCase } from './schemas.ts';
+
+const maxFailureMessageLength = 2_000;
+const maxFailingCasesInPrompt = 20;
+const maxTypecheckErrorsInPrompt = 40;
+
+export type TestFailure = {
+  fullName: string;
+  failureMessages: string[];
+};
+
+export type FileFailures = {
+  testFile: string;
+  failingCases: TestFailure[];
+  loadError?: string;
+  typecheckErrors: string[];
+  bannedPatterns: string[];
+};
+
+function section(title: string, body: string) {
+  return `## ${title}\n\n${body}`;
+}
+
+function skillsSection(skills: Skill[]) {
+  return section(
+    'Skills',
+    [
+      'The references this task needs are included below. The other files the skills link to are not needed here.',
+      ...skills.map((skill) => `### ${skill.name}\n\n${skill.instructions}`),
+    ].join('\n\n'),
+  );
+}
+
+function jsonBlock(value: object) {
+  return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``;
+}
+
+function describeWorkItem(item: WorkItem) {
+  return {
+    sourceFile: item.sourceFile,
+    existingTestFiles: item.testFiles,
+    coverage: item.coverage
+      ? {
+          statements: `${item.coverage.statements.covered}/${item.coverage.statements.total}`,
+          branches: `${item.coverage.branches.covered}/${item.coverage.branches.total}`,
+          uncoveredLines: item.coverage.uncoveredLines,
+          partlyTakenBranches: item.coverage.uncoveredBranches.map(
+            (branch) => `line ${branch.line} (${branch.type}, ${branch.takenOutcomes} of ${branch.totalOutcomes} outcomes taken)`,
+          ),
+        }
+      : 'no coverage data',
+  };
+}
+
+function describeCase(plannedCase: PlannedCase) {
+  return {
+    id: plannedCase.id,
+    sourceFile: plannedCase.sourceFile,
+    testFile: plannedCase.testFile,
+    name: plannedCase.name,
+    behaviour: plannedCase.behaviour,
+    catches: plannedCase.catches,
+    reason: plannedCase.reason,
+    overlap: plannedCase.overlap,
+    updatesExistingTest: plannedCase.updatesExistingTest,
+  };
+}
+
+function limitList<Item>(items: Item[], limit: number) {
+  return items.length > limit ? { shown: items.slice(0, limit), omitted: items.length - limit } : { shown: items, omitted: 0 };
+}
+
+function truncate(text: string) {
+  return text.length > maxFailureMessageLength ? `${text.slice(0, maxFailureMessageLength)}\n[truncated]` : text;
+}
+
+type PlanPromptOptions = {
+  skills: Skill[];
+  workItems: WorkItem[];
+  missingBehaviours?: { sourceFile: string; behaviour: string; reason: string }[];
+  approvedCases?: PlannedCase[];
+};
+
+export function buildPlanPrompt({ skills, workItems, missingBehaviours = [], approvedCases = [] }: PlanPromptOptions) {
+  const isFollowUp = missingBehaviours.length > 0;
+  const sections = [
+    isFollowUp
+      ? 'Add unit test cases for the behaviours a reviewer found missing from an approved plan. All paths are relative to your working directory.'
+      : 'Plan unit tests for the source files below. All paths are relative to your working directory.',
+    skillsSection(skills),
+    section('Work items', jsonBlock(workItems.map(describeWorkItem))),
+  ];
+  if (isFollowUp) {
+    sections.push(
+      section('Already approved cases', `These stay as they are. Don't repeat them.\n\n${jsonBlock(approvedCases.map(describeCase))}`),
+      section('Missing behaviours', `Plan cases only for these, unless existing tests or approved cases already cover them:\n\n${jsonBlock(missingBehaviours)}`),
+      section('Output', 'Return only the new cases, with the test file each goes into. Leave `skipped` empty.'),
+    );
+  } else {
+    sections.push(
+      section(
+        'Output',
+        'Return every source file you plan cases for, with the test file the cases go into and the cases. Set `updatesExistingTest` only for a case that changes an existing test. List source files that need no new cases under `skipped`, with the reason.',
+      ),
+    );
+  }
+  return sections.join('\n\n');
+}
+
+type ReviewPromptOptions = {
+  skills: Skill[];
+  workItems: WorkItem[];
+  cases: PlannedCase[];
+  approvedCases?: PlannedCase[];
+};
+
+export function buildReviewPrompt({ skills, workItems, cases, approvedCases = [] }: ReviewPromptOptions) {
+  const sections = [
+    'Review this unit test plan. All paths are relative to your working directory.',
+    skillsSection(skills),
+    section('Source files and their existing tests', jsonBlock(workItems.map(describeWorkItem))),
+  ];
+  if (approvedCases.length > 0) {
+    sections.push(section('Cases approved earlier', `Not for review. Use them to spot duplicates.\n\n${jsonBlock(approvedCases.map(describeCase))}`));
+  }
+  sections.push(
+    section('Planned cases', jsonBlock(cases.map(describeCase))),
+    section(
+      'Output',
+      'Give a verdict for every planned case id, with a one-sentence reason. Under `missing`, list important untested behaviours the plan misses, or nothing.',
+    ),
+  );
+  return sections.join('\n\n');
+}
+
+type WritePromptOptions = {
+  skills: Skill[];
+  cases: PlannedCase[];
+};
+
+export function buildWritePrompt({ skills, cases }: WritePromptOptions) {
+  return [
+    'Write these approved unit test cases. All paths are relative to your working directory.',
+    skillsSection(skills),
+    section('Approved cases', jsonBlock(cases.map(describeCase))),
+    section('Output', 'Return every test file you wrote or changed, with the ids of the cases it now contains.'),
+  ].join('\n\n');
+}
+
+type FixPromptOptions = {
+  skills: Skill[];
+  failures: FileFailures;
+  cases: PlannedCase[];
+  attempt: number;
+  maxAttempts: number;
+};
+
+export function buildFixPrompt({ skills, failures, cases, attempt, maxAttempts }: FixPromptOptions) {
+  const typecheckErrors = limitList(failures.typecheckErrors, maxTypecheckErrorsInPrompt);
+  const failingCases = limitList(failures.failingCases, maxFailingCasesInPrompt);
+  const report = {
+    testFile: failures.testFile,
+    typecheckErrors: typecheckErrors.shown,
+    typecheckErrorsOmitted: typecheckErrors.omitted || undefined,
+    forbiddenShortcuts: failures.bannedPatterns,
+    loadError: failures.loadError ? truncate(failures.loadError) : undefined,
+    failingCases: failingCases.shown.map((failure) => ({
+      name: failure.fullName,
+      messages: failure.failureMessages.map(truncate),
+    })),
+    failingCasesOmitted: failingCases.omitted || undefined,
+  };
+  return [
+    `Fix the failing tests in ${failures.testFile}. This is attempt ${attempt} of ${maxAttempts}. All paths are relative to your working directory.`,
+    skillsSection(skills),
+    section('The cases this file is meant to contain', jsonBlock(cases.map(describeCase))),
+    section('Failures', jsonBlock(report)),
+    section('Output', 'Return the test files you changed, and notes on anything you couldn\'t fix or chose not to change.'),
+  ].join('\n\n');
+}
