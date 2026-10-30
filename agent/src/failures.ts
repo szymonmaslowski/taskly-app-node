@@ -23,7 +23,7 @@ export function collectFailures({ workspaceRoot, testFiles, cases, fileErrors, t
       .map((testCase) => ({ fullName: testCase.fullName, failureMessages: testCase.failureMessages }));
     const loadError = fileErrors.find((error) => error.file === workspacePath)?.message;
     if (typecheckErrors.length > 0 || failingCases.length > 0 || loadError) {
-      failures.push({ testFile, failingCases, loadError, typecheckErrors });
+      failures.push({ testFile, failingCases, loadError, typecheckErrors, bannedPatterns: [] });
     }
   }
   return failures;

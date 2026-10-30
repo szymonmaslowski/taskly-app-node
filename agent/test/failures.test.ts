@@ -23,8 +23,9 @@ describe('collectFailures', () => {
         failingCases: [{ fullName: 'fails', failureMessages: ['expected 500'] }],
         loadError: undefined,
         typecheckErrors: ["tests/health.test.ts(4,7): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'."],
+        bannedPatterns: [],
       },
-      { testFile: 'backend/tests/config.test.ts', failingCases: [], loadError: 'Cannot find module', typecheckErrors: [] },
+      { testFile: 'backend/tests/config.test.ts', failingCases: [], loadError: 'Cannot find module', typecheckErrors: [], bannedPatterns: [] },
     ]);
   });
 });

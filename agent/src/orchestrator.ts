@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { z } from 'zod';
 import { loadAgentDefinition, type AgentDefinition } from './agents.ts';
@@ -20,6 +20,8 @@ import { applyReview, numberCases, partitionPlannedCases, type CaseDecision } fr
 import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt, type FileFailures } from './stages/prompts.ts';
 import { fixOutputSchema, planOutputSchema, reviewOutputSchema, writeOutputSchema, type PlannedCase } from './stages/schemas.ts';
 import { loopLimits, stageSettings } from './stages.ts';
+import { compareTestFile, findCasesByRuntimeNames, removeCases, revertCases, type CaseChange } from './tests/test-changes.ts';
+import { findBannedPatterns, newBannedPatterns } from './tests/test-cases.ts';
 
 const maxRepositoryFileBytes = 2_000_000;
 
@@ -32,6 +34,9 @@ type StageAgents = {
 
 type WorkspaceContext = {
   name: string;
+  repositoryRoot: string;
+  knownFiles: Set<string>;
+  testedFilesByTest: Map<string, string[]>;
   workspace: WorkspaceConfig;
   skill: Skill;
   readingSkill: Skill;
@@ -50,7 +55,15 @@ export type BatchResult = {
   skipped: { sourceFile: string; reason: string }[];
   fixAttempts: number;
   remainingFailures: FileFailures[];
+  removedCases: { testFile: string; name: string }[];
+  revertedCases: { testFile: string; name: string }[];
+  revertedFiles: string[];
   fixerNotes: string[];
+};
+
+export type TestFileChanges = {
+  testFile: string;
+  changes: CaseChange[];
 };
 
 export type WorkspaceResult = {
@@ -59,6 +72,7 @@ export type WorkspaceResult = {
   fullyCovered: string[];
   batches: BatchResult[];
   changes: StagingChanges;
+  testFileChanges: TestFileChanges[];
   usages: StageUsage[];
 };
 
@@ -93,6 +107,31 @@ async function checkStagingChanges(context: WorkspaceContext) {
   return changes;
 }
 
+async function readOriginalFile(context: WorkspaceContext, repositoryPath: string) {
+  if (!context.manifest.has(repositoryPath)) return undefined;
+  return readRegularFile(path.join(context.repositoryRoot, repositoryPath), maxRepositoryFileBytes);
+}
+
+async function readStagedFile(context: WorkspaceContext, repositoryPath: string) {
+  try {
+    return await readRegularFile(path.join(context.directories.staging, repositoryPath), maxRepositoryFileBytes);
+  } catch {
+    return undefined;
+  }
+}
+
+async function findNewBannedPatterns(context: WorkspaceContext, testFile: string) {
+  const after = await readStagedFile(context, testFile);
+  if (after === undefined) return [];
+  const testedFiles = context.testedFilesByTest.get(testFile) ?? [];
+  const options = { fileName: testFile, testedFiles, knownFiles: context.knownFiles };
+  const before = await readOriginalFile(context, testFile);
+  const patternsBefore = before === undefined ? [] : findBannedPatterns({ ...options, content: before });
+  return newBannedPatterns(patternsBefore, findBannedPatterns({ ...options, content: after })).map(
+    (pattern) => `${pattern.kind} at line ${pattern.line}`,
+  );
+}
+
 async function runTouchedTests(context: WorkspaceContext, testFiles: string[], attemptLabel: string) {
   const { logger, workspace, directories } = context;
   if (testFiles.length === 0) return [];
@@ -112,10 +151,18 @@ async function runTouchedTests(context: WorkspaceContext, testFiles: string[], a
     fileErrors: testRun.fileErrors,
     typecheckOutput: typecheck.output,
   });
+  for (const testFile of testFiles) {
+    const bannedPatterns = await findNewBannedPatterns(context, testFile);
+    if (bannedPatterns.length === 0) continue;
+    const existing = failures.find((failure) => failure.testFile === testFile);
+    if (existing) existing.bannedPatterns = bannedPatterns;
+    else failures.push({ testFile, failingCases: [], typecheckErrors: [], bannedPatterns });
+  }
   for (const failure of failures) {
     for (const failingCase of failure.failingCases) logger.untrusted(`✗ ${failure.testFile}: ${failingCase.fullName}`);
     if (failure.loadError) logger.untrusted(`✗ ${failure.testFile} failed to load`);
     if (failure.typecheckErrors.length > 0) logger.untrusted(`✗ ${failure.testFile}: ${failure.typecheckErrors.length} type errors`);
+    for (const bannedPattern of failure.bannedPatterns) logger.untrusted(`✗ ${failure.testFile}: forbidden ${bannedPattern}`);
   }
   const passed = testRun.cases.filter((testCase) => testCase.status === 'passed').length;
   const failed = testRun.cases.filter((testCase) => testCase.status === 'failed').length;
@@ -208,11 +255,73 @@ async function fixFailures(context: WorkspaceContext, cases: PlannedCase[], init
   return { failures, attempts: attempt, notes };
 }
 
+async function restoreFile(context: WorkspaceContext, testFile: string) {
+  const original = await readOriginalFile(context, testFile);
+  const stagedPath = path.join(context.directories.staging, testFile);
+  if (original === undefined) await rm(stagedPath, { force: true });
+  else await writeFile(stagedPath, original);
+}
+
+async function cleanUpRemainingFailures(context: WorkspaceContext, failures: FileFailures[]) {
+  const { logger } = context;
+  const removedCases: BatchResult['removedCases'] = [];
+  const revertedCases: BatchResult['revertedCases'] = [];
+  const revertedFiles: string[] = [];
+  const cleanup = { removedCases, revertedCases, revertedFiles };
+  if (failures.length === 0) return { ...cleanup, remainingFailures: [] };
+  logger.startStep('clean up remaining failures');
+  for (const failure of failures) {
+    const current = await readStagedFile(context, failure.testFile);
+    const original = await readOriginalFile(context, failure.testFile);
+    const fileIsBroken = failure.loadError || failure.typecheckErrors.length > 0 || failure.bannedPatterns.length > 0;
+    if (current === undefined || fileIsBroken) {
+      await restoreFile(context, failure.testFile);
+      cleanup.revertedFiles.push(failure.testFile);
+      logger.untrusted(`reverted ${failure.testFile}`);
+      continue;
+    }
+    const changesByName = new Map(compareTestFile(failure.testFile, original, current).map((change) => [change.name, change]));
+    const failingCases = findCasesByRuntimeNames(failure.testFile, current, failure.failingCases.map((failingCase) => failingCase.fullName));
+    const added = failingCases.filter((testCase) => changesByName.get(testCase.name)?.kind === 'added').map((testCase) => testCase.name);
+    const modified = failingCases.filter((testCase) => changesByName.get(testCase.name)?.kind === 'modified').map((testCase) => testCase.name);
+    let updated = removeCases(failure.testFile, current, added);
+    if (original !== undefined) updated = revertCases(failure.testFile, updated, original, modified);
+    await writeFile(path.join(context.directories.staging, failure.testFile), updated);
+    for (const name of added) cleanup.removedCases.push({ testFile: failure.testFile, name });
+    for (const name of modified) cleanup.revertedCases.push({ testFile: failure.testFile, name });
+    for (const name of [...added, ...modified]) logger.untrusted(`${added.includes(name) ? 'removed' : 'reverted'} ${failure.testFile}: ${name}`);
+  }
+  await checkStagingChanges(context);
+  const remaining = await runTouchedTests(context, failures.map((failure) => failure.testFile).filter((testFile) => !cleanup.revertedFiles.includes(testFile)), 'after clean-up');
+  for (const failure of remaining) {
+    const developerCasesOnly = failure.failingCases.length > 0 && !failure.loadError && failure.typecheckErrors.length === 0 && failure.bannedPatterns.length === 0;
+    if (developerCasesOnly) continue;
+    await restoreFile(context, failure.testFile);
+    cleanup.revertedFiles.push(failure.testFile);
+  }
+  if (cleanup.revertedFiles.length > 0) await checkStagingChanges(context);
+  logger.endStep(`${cleanup.removedCases.length} cases removed, ${cleanup.revertedCases.length} cases reverted, ${cleanup.revertedFiles.length} files reverted`);
+  return { ...cleanup, remainingFailures: remaining.filter((failure) => !cleanup.revertedFiles.includes(failure.testFile)) };
+}
+
 async function processBatch(context: WorkspaceContext, batch: WorkBatch): Promise<BatchResult> {
   const planned = await planBatch(context, batch);
   const keptCases = planned.decisions.filter((decision) => decision.verdict === 'keep');
-  const result: BatchResult = { module: batch.module, ...planned, fixAttempts: 0, remainingFailures: [], fixerNotes: [] };
+  const result: BatchResult = {
+    module: batch.module,
+    ...planned,
+    fixAttempts: 0,
+    remainingFailures: [],
+    removedCases: [],
+    revertedCases: [],
+    revertedFiles: [],
+    fixerNotes: [],
+  };
   if (keptCases.length === 0) return result;
+  for (const keptCase of keptCases) {
+    const testedFiles = context.testedFilesByTest.get(keptCase.testFile) ?? [];
+    if (!testedFiles.includes(keptCase.sourceFile)) context.testedFilesByTest.set(keptCase.testFile, [...testedFiles, keptCase.sourceFile]);
+  }
 
   context.logger.startStep(`write · ${batch.module}`);
   const written = await runContextStage(context, {
@@ -228,7 +337,8 @@ async function processBatch(context: WorkspaceContext, batch: WorkBatch): Promis
   const touchedTestFiles = [...new Set(keptCases.map((keptCase) => keptCase.testFile))].filter((testFile) => changedPaths.has(testFile));
   const failures = await runTouchedTests(context, touchedTestFiles, 'after write');
   const fixed = await fixFailures(context, keptCases, failures);
-  return { ...result, fixAttempts: fixed.attempts, remainingFailures: fixed.failures, fixerNotes: fixed.notes };
+  const cleanup = await cleanUpRemainingFailures(context, fixed.failures);
+  return { ...result, fixAttempts: fixed.attempts, fixerNotes: fixed.notes, ...cleanup };
 }
 
 type RunRepositoryModeOptions = {
@@ -280,6 +390,9 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
       const manifest = await createStagingCopy({ repositoryRoot, trackedFiles, workspace, destination: directories.staging });
       const context: WorkspaceContext = {
         name,
+        repositoryRoot,
+        knownFiles: new Set(trackedFiles),
+        testedFilesByTest: new Map(),
         workspace,
         skill: await loadSkill(repositoryRoot, workspace.skill),
         readingSkill,
@@ -294,8 +407,21 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
       for (const batch of batches) batchResults.push(await processBatch(context, batch));
 
       const changes = await diffStagingCopy(directories.staging, manifest);
+      const testFileChanges: TestFileChanges[] = [];
+      for (const testFile of [...changes.added, ...changes.modified, ...changes.deleted]) {
+        const fileChanges = compareTestFile(testFile, await readOriginalFile(context, testFile), await readStagedFile(context, testFile));
+        if (fileChanges.length > 0) testFileChanges.push({ testFile, changes: fileChanges });
+      }
       await applyStagingToRepository(directories.staging, repositoryRoot, changes);
-      results.push({ name, coverageBefore: coverage, fullyCovered: work.fullyCovered, batches: batchResults, changes, usages: context.usages });
+      results.push({
+        name,
+        coverageBefore: coverage,
+        fullyCovered: work.fullyCovered,
+        batches: batchResults,
+        changes,
+        testFileChanges,
+        usages: context.usages,
+      });
     } finally {
       await removeRunDirectories(directories);
     }

@@ -14,6 +14,7 @@ export type FileFailures = {
   failingCases: TestFailure[];
   loadError?: string;
   typecheckErrors: string[];
+  bannedPatterns: string[];
 };
 
 function section(title: string, body: string) {
@@ -144,6 +145,7 @@ export function buildFixPrompt({ skill, readingSkill, failures, cases, attempt, 
   const report = {
     testFile: failures.testFile,
     typecheckErrors: failures.typecheckErrors,
+    forbiddenShortcuts: failures.bannedPatterns,
     loadError: failures.loadError ? truncate(failures.loadError) : undefined,
     failingCases: failures.failingCases.map((failure) => ({
       name: failure.fullName,
