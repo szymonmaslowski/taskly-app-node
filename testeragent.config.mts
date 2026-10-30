@@ -12,9 +12,9 @@ export default defineConfig({
       shared: ['tests/fixture.ts'],
       context: ['package.json', 'tsconfig.json', 'vitest.config.ts', 'openapi.json', 'prisma/schema.prisma'],
       commands: {
-        install: ['npm ci --ignore-scripts', 'npx prisma generate'],
-        typecheck: 'npx tsc --noEmit',
-        test: 'npx vitest run',
+        install: ['npm ci --ignore-scripts', 'node_modules/.bin/prisma generate'],
+        typecheck: 'node_modules/.bin/tsc --noEmit',
+        test: 'node_modules/.bin/vitest run',
       },
     },
     frontend: {
@@ -37,8 +37,8 @@ export default defineConfig({
       context: ['package.json', 'tsconfig.json', 'vite.config.ts'],
       commands: {
         install: ['npm ci --ignore-scripts'],
-        typecheck: 'npx tsc --noEmit',
-        test: 'npx vitest run',
+        typecheck: 'node_modules/.bin/tsc --noEmit',
+        test: 'node_modules/.bin/vitest run',
       },
     },
   },
