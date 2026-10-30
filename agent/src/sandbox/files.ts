@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { copyFile, lstat, mkdir, readdir, readFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { copyFile, lstat, mkdir, open, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import picomatch from 'picomatch';
 import type { z } from 'zod';
@@ -65,13 +66,35 @@ export async function listTree(root: string) {
   return { files, symbolicLinks };
 }
 
+function openWithoutFollowing(filePath: string) {
+  // O_NONBLOCK keeps a planted FIFO from blocking the open; the type check below then rejects it.
+  return open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch((error: NodeJS.ErrnoException) => {
+    throw error.code === 'ELOOP' ? new SymbolicLinkError(filePath) : error;
+  });
+}
+
+// Only the last path component is protected from symbolic links, so callers read files from directories they created.
 export async function readRegularFile(filePath: string, maxBytes: number) {
-  const stats = await assertRegularFile(filePath, filePath);
-  if (stats.size > maxBytes) throw new Error(`File too large (${stats.size} bytes, limit ${maxBytes}): ${filePath}`);
-  return readFile(filePath, 'utf8');
+  const handle = await openWithoutFollowing(filePath);
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) throw new Error(`Not a regular file: ${filePath}`);
+    if (stats.size > maxBytes) throw new Error(`File too large (${stats.size} bytes, limit ${maxBytes}): ${filePath}`);
+    return await handle.readFile('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
+function parseJson(content: string, filePath: string) {
+  try {
+    return JSON.parse(content);
+  } catch {
+    throw new Error(`Invalid JSON in ${filePath}`);
+  }
 }
 
 export async function readJsonFile<Schema extends z.ZodType>(filePath: string, schema: Schema, maxBytes: number) {
   const content = await readRegularFile(filePath, maxBytes);
-  return schema.parse(JSON.parse(content)) as z.output<Schema>;
+  return schema.parse(parseJson(content, filePath)) as z.output<Schema>;
 }
