@@ -1,5 +1,8 @@
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { configSchema, type WorkspaceConfigInput } from '../src/config.ts';
+import { configSchema, loadConfig, type WorkspaceConfigInput } from '../src/config.ts';
+
+const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 function workspace(overrides: Partial<WorkspaceConfigInput> = {}): WorkspaceConfigInput {
   return {
@@ -12,6 +15,14 @@ function workspace(overrides: Partial<WorkspaceConfigInput> = {}): WorkspaceConf
     ...overrides,
   };
 }
+
+describe('loadConfig', () => {
+  it('loads and validates the repository configuration', async () => {
+    const config = await loadConfig(repositoryRoot);
+    expect(Object.keys(config.workspaces)).toEqual(['backend', 'frontend']);
+    expect(config.workspaces.backend.writable).toEqual(['tests/**']);
+  });
+});
 
 describe('configSchema', () => {
   it('fills in defaults for optional settings', () => {
