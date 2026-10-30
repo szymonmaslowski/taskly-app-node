@@ -96,13 +96,13 @@ describe('createStagingCopy and diffStagingCopy', () => {
 });
 
 describe('findDisallowedChanges', () => {
-  it('returns every change outside the writable globs', () => {
+  it('returns every change outside the writable globs and every deletion', () => {
     const changes = {
       added: ['backend/tests/new.test.ts', 'backend/src/helper.ts'],
       modified: ['backend/src/router.ts'],
       deleted: ['backend/tests/fixture.ts'],
       symbolicLinks: [],
     };
-    expect(findDisallowedChanges(changes, workspace)).toEqual(['backend/src/helper.ts', 'backend/src/router.ts']);
+    expect(findDisallowedChanges(changes, workspace)).toEqual(['backend/src/helper.ts', 'backend/src/router.ts', 'backend/tests/fixture.ts']);
   });
 });

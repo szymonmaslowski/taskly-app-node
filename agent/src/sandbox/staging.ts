@@ -58,5 +58,5 @@ export async function diffStagingCopy(destination: string, manifest: StagingMani
 
 export function findDisallowedChanges(changes: StagingChanges, workspace: WorkspaceConfig) {
   const isWritable = createMatcher(workspace.root, workspace.writable);
-  return [...changes.added, ...changes.modified, ...changes.deleted].filter((relativePath) => !isWritable(relativePath));
+  return [...changes.added, ...changes.modified].filter((relativePath) => !isWritable(relativePath)).concat(changes.deleted);
 }
