@@ -30,6 +30,8 @@ export default defineConfig({
         'src/**/types.ts',
         'src/**/*.types.ts',
         'src/**/index.ts',
+        'src/features/todos/api/queryKeys.ts',
+        'src/lib/queryClient.ts',
       ],
       tests: ['src/**/*.test.{ts,tsx}'],
       writable: ['src/**/*.test.{ts,tsx}', 'src/test/**'],
