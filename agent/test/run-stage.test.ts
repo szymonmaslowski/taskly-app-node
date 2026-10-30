@@ -71,7 +71,7 @@ describe('readStreamLine', () => {
 describe('buildClaudeArguments', () => {
   it('restricts the session to the agent tools and never allows Bash or web access', () => {
     const settings = { effort: 'high' as const, maxTurns: 15, timeoutMinutes: 8, maxBudgetUsd: 2 };
-    const commandLine = buildClaudeArguments({ agent: reviewer, prompt: 'Review', model: 'claude-opus-5-5', settings, jsonSchema: {} });
+    const commandLine = buildClaudeArguments({ agent: reviewer, model: 'claude-opus-5-5', settings, jsonSchema: {} });
     expect(commandLine).toEqual(expect.arrayContaining(['--restricted', '--strict-mcp-config', '--output-format', 'stream-json']));
     expect(commandLine[commandLine.indexOf('--tools') + 1]).toBe('Read,Grep,Glob');
     expect(commandLine[commandLine.indexOf('--disallowedTools') + 1]).toBe('WebFetch,WebSearch,Bash');
@@ -82,7 +82,7 @@ describe('buildClaudeArguments', () => {
   it('lets writing agents edit files without asking', () => {
     const writer: AgentDefinition = { ...reviewer, name: 'test-writer', tools: ['Read', 'Edit', 'Write'] };
     const settings = { effort: 'medium' as const, maxTurns: 40, timeoutMinutes: 15, maxBudgetUsd: 4 };
-    const commandLine = buildClaudeArguments({ agent: writer, prompt: 'Write', model: 'claude-sonnet-5-5', settings, jsonSchema: {} });
+    const commandLine = buildClaudeArguments({ agent: writer, model: 'claude-sonnet-5-5', settings, jsonSchema: {} });
     expect(commandLine[commandLine.indexOf('--allowedTools') + 1]).toBe('Read,Edit,Write');
     expect(commandLine[commandLine.indexOf('--permission-mode') + 1]).toBe('acceptEdits');
   });

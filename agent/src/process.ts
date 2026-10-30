@@ -11,6 +11,7 @@ export type RunProcessOptions = {
   cwd?: string;
   timeoutMilliseconds: number;
   maxOutputCharacters?: number;
+  input?: string;
   onStdoutLine?: (line: string) => void;
 };
 
@@ -22,7 +23,8 @@ function appendCapped(buffer: string, chunk: string, maxCharacters: number) {
 export function runProcess(command: string, args: string[], options: RunProcessOptions) {
   const maxOutputCharacters = options.maxOutputCharacters ?? 1_000_000;
   return new Promise<ProcessResult>((resolve, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd: options.cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    child.stdin.end(options.input);
     let stdout = '';
     let stderr = '';
     let pendingLine = '';

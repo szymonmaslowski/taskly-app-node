@@ -1,4 +1,5 @@
-import { appendFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { finished } from 'node:stream/promises';
 import { homedir, userInfo } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
@@ -104,16 +105,15 @@ export function isWritingAgent(agent: AgentDefinition) {
 
 type ClaudeArgumentsOptions = {
   agent: AgentDefinition;
-  prompt: string;
   model: string;
   settings: StageSettings;
   jsonSchema: object;
 };
 
-export function buildClaudeArguments({ agent, prompt, model, settings, jsonSchema }: ClaudeArgumentsOptions) {
+// The prompt goes on stdin: a single argument is capped at 128 KiB on Linux, and fix prompts can be longer.
+export function buildClaudeArguments({ agent, model, settings, jsonSchema }: ClaudeArgumentsOptions) {
   return [
     '-p',
-    prompt,
     '--restricted',
     '--strict-mcp-config',
     '--settings',
@@ -147,6 +147,7 @@ export function buildClaudeArguments({ agent, prompt, model, settings, jsonSchem
 export function buildDockerArguments(workingDirectory: string, writable: boolean, credentialArguments: string[]) {
   const { uid, gid } = userInfo();
   return [
+    '--interactive',
     '--user',
     `${uid}:${gid}`,
     ...credentialArguments,
@@ -187,25 +188,26 @@ async function runAttempt<Schema extends z.ZodType>(options: RunStageOptions<Sch
   const { agent, workingDirectory, outputSchema, settings, logger, transcriptFile } = options;
   const dockerArguments = buildDockerArguments(workingDirectory, isWritingAgent(agent), resolveCredentialArguments());
   const jsonSchema = z.toJSONSchema(outputSchema, { target: 'draft-7' });
-  const claudeArguments = buildClaudeArguments({ agent, prompt, model, settings, jsonSchema });
+  const claudeArguments = buildClaudeArguments({ agent, model, settings, jsonSchema });
   let resultEvent: ResultEvent | undefined;
-  const pendingTranscriptWrites: Promise<void>[] = [];
+  const transcript = transcriptFile ? createWriteStream(transcriptFile, { flags: 'a' }) : undefined;
   const processResult = await runContainer(createContainerName('agent'), [...dockerArguments, ...claudeArguments], {
     timeoutMilliseconds: settings.timeoutMinutes * 60_000,
-    maxOutputCharacters: 50_000_000,
+    input: prompt,
     onStdoutLine(line) {
-      if (transcriptFile) pendingTranscriptWrites.push(appendFile(transcriptFile, `${line}\n`));
+      transcript?.write(`${line}\n`);
       resultEvent = readStreamLine(line, logger) ?? resultEvent;
     },
   });
-  await Promise.all(pendingTranscriptWrites);
+  if (transcript) await finished(transcript.end());
   if (processResult.timedOut) throw new Error(`Stage ${agent.name} timed out after ${settings.timeoutMinutes} minutes`);
   if (!resultEvent) throw new Error(`Stage ${agent.name} ended without a result: ${processResult.stderr.trim().slice(0, 500)}`);
   for (const denial of resultEvent.permission_denials) {
     logger.untrusted(`denied: ${describeToolUse(denial.tool_name, denial.tool_input)}`);
   }
+  // A stage that hit its turn or budget limit would hit it again, so only invalid output is retried.
+  if (resultEvent.is_error) throw new Error(`Stage ${agent.name} ended with "${resultEvent.subtype}"`);
   const usage = toUsage(model, resultEvent);
-  if (resultEvent.is_error) return { usage, error: `the stage ended with "${resultEvent.subtype}"` };
   const parsed = outputSchema.safeParse(resultEvent.structured_output);
   if (!parsed.success) return { usage, error: z.prettifyError(parsed.error) };
   return { usage, output: parsed.data as z.output<Schema> };

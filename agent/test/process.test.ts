@@ -7,6 +7,11 @@ describe('runProcess', () => {
     expect(result).toEqual({ exitCode: 3, stdout: 'out\n', stderr: 'err\n', timedOut: false });
   });
 
+  it('passes the input on stdin', async () => {
+    const result = await runProcess('cat', [], { timeoutMilliseconds: 5_000, input: 'prompt text' });
+    expect(result.stdout).toBe('prompt text');
+  });
+
   it('kills a process that runs past its timeout', async () => {
     const result = await runProcess('sleep', ['5'], { timeoutMilliseconds: 100 });
     expect(result.timedOut).toBe(true);
