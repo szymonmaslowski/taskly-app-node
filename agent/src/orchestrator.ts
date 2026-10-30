@@ -127,44 +127,48 @@ async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
   const { logger, agents, skill, workspace } = context;
   const isWritable = createMatcher(workspace.root, workspace.writable);
   const sourceFiles = new Set(batch.items.map((item) => item.sourceFile));
+  const decisions: CaseDecision[] = [];
+  const rejectedCases: BatchResult['rejectedCases'] = [];
+  let skipped: BatchResult['skipped'] = [];
   let missingBehaviours: { sourceFile: string; behaviour: string; reason: string }[] = [];
   let firstCaseNumber = 1;
-  let result: Pick<BatchResult, 'decisions' | 'rejectedCases' | 'skipped'> = { decisions: [], rejectedCases: [], skipped: [] };
 
   for (let round = 1; round <= loopLimits.planRounds; round += 1) {
+    const approvedCases = decisions.filter((decision) => decision.verdict === 'keep');
     logger.startStep(`plan · ${batch.module} · round ${round}`);
     const plan = await runContextStage(context, {
       agent: agents.planner,
-      prompt: buildPlanPrompt({ skill, workItems: batch.items, missingBehaviours }),
+      prompt: buildPlanPrompt({ skill, workItems: batch.items, missingBehaviours, approvedCases }),
       settings: stageSettings.plan,
       outputSchema: planOutputSchema,
     });
     const numberedCases = numberCases(plan, firstCaseNumber);
     firstCaseNumber += numberedCases.length;
     const { accepted, rejected } = partitionPlannedCases(numberedCases, { sourceFiles, isWritable });
+    rejectedCases.push(...rejected);
+    if (round === 1) skipped = plan.skipped;
     for (const { reason } of rejected) logger.untrusted(`rejected: ${reason}`);
-    logger.endStep(`${accepted.length} cases planned, ${plan.skipped.length} files skipped`);
-
-    if (accepted.length === 0) return { ...result, rejectedCases: rejected, skipped: plan.skipped, decisions: [] };
+    logger.endStep(`${accepted.length} ${round === 1 ? 'cases planned' : 'cases added'}, ${plan.skipped.length} files skipped`);
+    if (accepted.length === 0) break;
 
     logger.startStep(`plan-review · ${batch.module} · round ${round}`);
     const review = await runContextStage(context, {
       agent: agents.reviewer,
-      prompt: buildReviewPrompt({ skill, workItems: batch.items, cases: accepted }),
+      prompt: buildReviewPrompt({ skill, workItems: batch.items, cases: accepted, approvedCases }),
       settings: stageSettings.planReview,
       outputSchema: reviewOutputSchema,
     });
-    const decisions = applyReview(accepted, review);
-    for (const decision of decisions.filter((candidate) => candidate.verdict === 'drop')) {
+    const roundDecisions = applyReview(accepted, review);
+    decisions.push(...roundDecisions);
+    for (const decision of roundDecisions.filter((candidate) => candidate.verdict === 'drop')) {
       logger.untrusted(`drop ${decision.id} ${decision.name}: ${decision.verdictReason}`);
     }
-    const kept = decisions.filter((decision) => decision.verdict === 'keep').length;
-    logger.endStep(`keep ${kept}, drop ${decisions.length - kept}, missing ${review.missing.length}`);
-    result = { decisions, rejectedCases: rejected, skipped: plan.skipped };
+    const kept = roundDecisions.filter((decision) => decision.verdict === 'keep').length;
+    logger.endStep(`keep ${kept}, drop ${roundDecisions.length - kept}, missing ${review.missing.length}`);
     if (review.missing.length === 0) break;
     missingBehaviours = review.missing;
   }
-  return result;
+  return { decisions, rejectedCases, skipped };
 }
 
 async function fixFailures(context: WorkspaceContext, cases: PlannedCase[], initialFailures: FileFailures[]) {

@@ -62,28 +62,32 @@ type PlanPromptOptions = {
   skill: Skill;
   workItems: WorkItem[];
   missingBehaviours?: { sourceFile: string; behaviour: string; reason: string }[];
+  approvedCases?: PlannedCase[];
 };
 
-export function buildPlanPrompt({ skill, workItems, missingBehaviours = [] }: PlanPromptOptions) {
+export function buildPlanPrompt({ skill, workItems, missingBehaviours = [], approvedCases = [] }: PlanPromptOptions) {
+  const isFollowUp = missingBehaviours.length > 0;
   const sections = [
-    'Plan unit tests for the source files below. All paths are relative to your working directory.',
+    isFollowUp
+      ? 'Add unit test cases for the behaviours a reviewer found missing from an approved plan. All paths are relative to your working directory.'
+      : 'Plan unit tests for the source files below. All paths are relative to your working directory.',
     section('Conventions for this workspace', skill.instructions),
     section('Work items', jsonBlock(workItems.map(describeWorkItem))),
   ];
-  if (missingBehaviours.length > 0) {
+  if (isFollowUp) {
+    sections.push(
+      section('Already approved cases', `These stay as they are. Don't repeat them.\n\n${jsonBlock(approvedCases.map(describeCase))}`),
+      section('Missing behaviours', `Plan cases only for these, unless existing tests or approved cases already cover them:\n\n${jsonBlock(missingBehaviours)}`),
+      section('Output', 'Return only the new cases, with the test file each goes into. Leave `skipped` empty.'),
+    );
+  } else {
     sections.push(
       section(
-        'Feedback from the plan review',
-        `A reviewer found behaviours your previous plan missed. Return the complete revised plan, adding cases for these unless existing tests cover them:\n\n${jsonBlock(missingBehaviours)}`,
+        'Output',
+        'Return every source file you plan cases for, with the test file the cases go into and the cases. Set `updatesExistingTest` only for a case that changes an existing test. List source files that need no new cases under `skipped`, with the reason.',
       ),
     );
   }
-  sections.push(
-    section(
-      'Output',
-      'Return every source file you plan cases for, with the test file the cases go into and the cases. Set `updatesExistingTest` only for a case that changes an existing test. List source files that need no new cases under `skipped`, with the reason.',
-    ),
-  );
   return sections.join('\n\n');
 }
 
@@ -91,19 +95,26 @@ type ReviewPromptOptions = {
   skill: Skill;
   workItems: WorkItem[];
   cases: PlannedCase[];
+  approvedCases?: PlannedCase[];
 };
 
-export function buildReviewPrompt({ skill, workItems, cases }: ReviewPromptOptions) {
-  return [
+export function buildReviewPrompt({ skill, workItems, cases, approvedCases = [] }: ReviewPromptOptions) {
+  const sections = [
     'Review this unit test plan. All paths are relative to your working directory.',
     section('Conventions for this workspace', skill.instructions),
     section('Source files and their existing tests', jsonBlock(workItems.map(describeWorkItem))),
+  ];
+  if (approvedCases.length > 0) {
+    sections.push(section('Cases approved earlier', `Not for review. Use them to spot duplicates.\n\n${jsonBlock(approvedCases.map(describeCase))}`));
+  }
+  sections.push(
     section('Planned cases', jsonBlock(cases.map(describeCase))),
     section(
       'Output',
-      'Give a verdict for every case id, with a one-sentence reason. Under `missing`, list important untested behaviours the plan misses, or nothing.',
+      'Give a verdict for every planned case id, with a one-sentence reason. Under `missing`, list important untested behaviours the plan misses, or nothing.',
     ),
-  ].join('\n\n');
+  );
+  return sections.join('\n\n');
 }
 
 type WritePromptOptions = {
