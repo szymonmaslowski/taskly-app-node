@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractTestCases, findBannedPatterns, newBannedPatterns } from '../src/tests/test-cases.ts';
-import { compareTestFile, findCasesByRuntimeNames, matchesCaseName, removeCases, revertCases } from '../src/tests/test-changes.ts';
+import { compareTestFile, findCasesByRuntimeNames, matchFailingCases, matchesCaseName, removeCases, revertCases } from '../src/tests/test-changes.ts';
 
 const original = `import { it, expect } from 'vitest';
 import { fromModel } from '../src/mappers.ts';
@@ -46,6 +46,21 @@ describe('matchesCaseName', () => {
     ['maps records', 'maps other records', false],
   ])('matches %s against %s', (sourceName, runtimeName, expected) => {
     expect(matchesCaseName(sourceName, runtimeName)).toBe(expected);
+  });
+});
+
+describe('matchFailingCases', () => {
+  it('matches runtime names of parameterised cases to their source case', () => {
+    const { cases, allMatched } = matchFailingCases('mappers.test.ts', original, ['dates keeps due date null', 'dates keeps due date 2026-10-15']);
+    expect(allMatched).toBe(true);
+    expect(cases.map((testCase) => testCase.name)).toEqual(['dates keeps due date %s']);
+  });
+
+  it.each([
+    ['a template literal title', "it(`maps ${kind}`, () => {});", 'maps record'],
+    ['a duplicate title', "it('maps', () => {});\nit('maps', () => {});", 'maps'],
+  ])('does not match %s', (_description, content, runtimeName) => {
+    expect(matchFailingCases('cases.test.ts', content, [runtimeName]).allMatched).toBe(false);
   });
 });
 

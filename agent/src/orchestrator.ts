@@ -21,7 +21,7 @@ import { applyReview, numberCases, partitionPlannedCases, type CaseDecision } fr
 import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt, type FileFailures } from './stages/prompts.ts';
 import { fixOutputSchema, planOutputSchema, reviewOutputSchema, writeOutputSchema, type PlannedCase } from './stages/schemas.ts';
 import { loopLimits, stageSettings } from './stages.ts';
-import { compareTestFile, findCasesByRuntimeNames, removeCases, revertCases, type CaseChange } from './tests/test-changes.ts';
+import { compareTestFile, findCasesByRuntimeNames, matchFailingCases, removeCases, revertCases, type CaseChange } from './tests/test-changes.ts';
 import { findBannedPatterns, newBannedPatterns } from './tests/test-cases.ts';
 
 const maxRepositoryFileBytes = 2_000_000;
@@ -330,6 +330,20 @@ async function restoreFile(context: WorkspaceContext, testFile: string) {
   else await writeFile(stagedPath, original);
 }
 
+function isFileBroken(failure: FileFailures) {
+  return Boolean(failure.loadError) || failure.typecheckErrors.length > 0 || failure.bannedPatterns.length > 0;
+}
+
+async function failsOnlyInUnchangedCases(context: WorkspaceContext, failure: FileFailures) {
+  if (isFileBroken(failure) || failure.failingCases.length === 0) return false;
+  const current = await readStagedFile(context, failure.testFile);
+  if (current === undefined) return false;
+  const { cases, allMatched } = matchFailingCases(failure.testFile, current, failure.failingCases.map((failingCase) => failingCase.fullName));
+  if (!allMatched) return false;
+  const changedNames = new Set(compareTestFile(failure.testFile, await readOriginalFile(context, failure.testFile), current).map((change) => change.name));
+  return cases.every((testCase) => !changedNames.has(testCase.name));
+}
+
 async function cleanUpRemainingFailures(context: WorkspaceContext, batchStart: BatchSnapshot, failures: FileFailures[]) {
   const { logger } = context;
   const removedCases: BatchResult['removedCases'] = [];
@@ -338,20 +352,26 @@ async function cleanUpRemainingFailures(context: WorkspaceContext, batchStart: B
   const cleanup = { removedCases, revertedCases, revertedFiles };
   if (failures.length === 0) return { ...cleanup, remainingFailures: [] };
   logger.startStep('clean up remaining failures');
+  const revertFile = async (testFile: string) => {
+    await restoreFile(context, testFile);
+    if (!cleanup.revertedFiles.includes(testFile)) cleanup.revertedFiles.push(testFile);
+    logger.untrusted(`reverted ${testFile}`);
+  };
   for (const failure of failures) {
     const current = await readStagedFile(context, failure.testFile);
     const original = await readOriginalFile(context, failure.testFile);
-    const fileIsBroken = failure.loadError || failure.typecheckErrors.length > 0 || failure.bannedPatterns.length > 0;
-    if (current === undefined || fileIsBroken) {
-      await restoreFile(context, failure.testFile);
-      cleanup.revertedFiles.push(failure.testFile);
-      logger.untrusted(`reverted ${failure.testFile}`);
+    if (current === undefined || isFileBroken(failure)) {
+      await revertFile(failure.testFile);
+      continue;
+    }
+    const matched = matchFailingCases(failure.testFile, current, failure.failingCases.map((failingCase) => failingCase.fullName));
+    if (!matched.allMatched) {
+      await revertFile(failure.testFile);
       continue;
     }
     const changesByName = new Map(compareTestFile(failure.testFile, original, current).map((change) => [change.name, change]));
-    const failingCases = findCasesByRuntimeNames(failure.testFile, current, failure.failingCases.map((failingCase) => failingCase.fullName));
-    const added = failingCases.filter((testCase) => changesByName.get(testCase.name)?.kind === 'added').map((testCase) => testCase.name);
-    const modified = failingCases.filter((testCase) => changesByName.get(testCase.name)?.kind === 'modified').map((testCase) => testCase.name);
+    const added = matched.cases.filter((testCase) => changesByName.get(testCase.name)?.kind === 'added').map((testCase) => testCase.name);
+    const modified = matched.cases.filter((testCase) => changesByName.get(testCase.name)?.kind === 'modified').map((testCase) => testCase.name);
     let updated = removeCases(failure.testFile, current, added);
     if (original !== undefined) updated = revertCases(failure.testFile, updated, original, modified);
     await writeFile(path.join(context.directories.staging, failure.testFile), updated);
@@ -360,16 +380,20 @@ async function cleanUpRemainingFailures(context: WorkspaceContext, batchStart: B
     for (const name of [...added, ...modified]) logger.untrusted(`${added.includes(name) ? 'removed' : 'reverted'} ${failure.testFile}: ${name}`);
   }
   await checkStagingChanges(context);
-  const remaining = await runTouchedTests(context, await selectBatchTestRun(context, batchStart), 'after clean-up');
+  let remaining = await runTouchedTests(context, await selectBatchTestRun(context, batchStart, cleanup.revertedFiles), 'after clean-up');
+  const filesToRevert: string[] = [];
   for (const failure of remaining) {
-    const developerCasesOnly = failure.failingCases.length > 0 && !failure.loadError && failure.typecheckErrors.length === 0 && failure.bannedPatterns.length === 0;
-    if (developerCasesOnly) continue;
-    await restoreFile(context, failure.testFile);
-    cleanup.revertedFiles.push(failure.testFile);
+    if (cleanup.revertedFiles.includes(failure.testFile) || (await failsOnlyInUnchangedCases(context, failure))) continue;
+    filesToRevert.push(failure.testFile);
   }
-  if (cleanup.revertedFiles.length > 0) await checkStagingChanges(context);
+  if (filesToRevert.length > 0) {
+    for (const testFile of filesToRevert) await revertFile(testFile);
+    await checkStagingChanges(context);
+    remaining = await runTouchedTests(context, await selectBatchTestRun(context, batchStart, cleanup.revertedFiles), 'after reverting files');
+  }
   logger.endStep(`${cleanup.removedCases.length} cases removed, ${cleanup.revertedCases.length} cases reverted, ${cleanup.revertedFiles.length} files reverted`);
-  return { ...cleanup, remainingFailures: remaining.filter((failure) => !cleanup.revertedFiles.includes(failure.testFile)) };
+  // Reverted files stay in the remaining failures when they still fail, for example because the source changed under them.
+  return { ...cleanup, remainingFailures: remaining };
 }
 
 async function processBatch(context: WorkspaceContext, batch: WorkBatch): Promise<BatchResult> {

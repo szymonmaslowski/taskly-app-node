@@ -48,6 +48,21 @@ export function matchesCaseName(sourceName: string, runtimeName: string) {
   return new RegExp(`^${pattern}$`, 's').test(runtimeName);
 }
 
+// A runtime name counts as matched only when exactly one case has a matching, unique name; anything else can't be cleaned up case by case.
+export function matchFailingCases(fileName: string, content: string, runtimeNames: string[]) {
+  const cases = extractTestCases(fileName, content);
+  const nameCounts = new Map<string, number>();
+  for (const testCase of cases) nameCounts.set(testCase.name, (nameCounts.get(testCase.name) ?? 0) + 1);
+  const matched = new Set<TestCase>();
+  let allMatched = true;
+  for (const runtimeName of runtimeNames) {
+    const candidates = cases.filter((testCase) => matchesCaseName(testCase.name, runtimeName));
+    if (candidates.length === 1 && nameCounts.get(candidates[0].name) === 1) matched.add(candidates[0]);
+    else allMatched = false;
+  }
+  return { cases: [...matched], allMatched };
+}
+
 export function findCasesByRuntimeNames(fileName: string, content: string, runtimeNames: string[]) {
   return extractTestCases(fileName, content).filter((testCase) =>
     runtimeNames.some((runtimeName) => matchesCaseName(testCase.name, runtimeName)),
