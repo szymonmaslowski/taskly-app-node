@@ -1,6 +1,6 @@
 import type { PlanOutput, PlannedCase, ReviewOutput } from './schemas.ts';
 
-export type CaseDecision = PlannedCase & { verdict: 'keep' | 'drop'; verdictReason: string };
+export type CaseDecision = PlannedCase & { verdict: 'keep' | 'drop'; verdictReason: string; reviewed: boolean };
 
 export function numberCases(plan: PlanOutput, firstNumber = 1): PlannedCase[] {
   let nextNumber = firstNumber;
@@ -22,6 +22,7 @@ export function applyReview(cases: PlannedCase[], review: ReviewOutput): CaseDec
       ...plannedCase,
       verdict: verdict?.verdict ?? 'keep',
       verdictReason: verdict?.reason ?? 'The reviewer gave no verdict, so the case is kept.',
+      reviewed: verdict !== undefined,
     };
   });
 }

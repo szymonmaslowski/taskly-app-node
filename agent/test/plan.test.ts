@@ -50,10 +50,10 @@ describe('applyReview', () => {
       verdicts: [{ caseId: 'c2', verdict: 'drop', reason: 'Duplicates an existing test.' }],
       missing: [],
     });
-    expect(decisions.map(({ id, verdict }) => [id, verdict])).toEqual([
-      ['c1', 'keep'],
-      ['c2', 'drop'],
-      ['c3', 'keep'],
+    expect(decisions.map(({ id, verdict, reviewed }) => [id, verdict, reviewed])).toEqual([
+      ['c1', 'keep', false],
+      ['c2', 'drop', true],
+      ['c3', 'keep', false],
     ]);
   });
 });

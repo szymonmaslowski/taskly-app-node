@@ -28,8 +28,8 @@ const result: WorkspaceResult = {
     {
       module: 'backend/src/api',
       decisions: [
-        { id: 'c1', name: 'reports ok', behaviour: 'b', reason: 'r', overlap: 'none', updatesExistingTest: false, sourceFile: 'backend/src/api/health.ts', testFile: 'backend/tests/health.test.ts', verdict: 'keep', verdictReason: 'ok' },
-        { id: 'c2', name: 'checks the query', behaviour: 'b', reason: 'r', overlap: 'none', updatesExistingTest: false, sourceFile: 'backend/src/api/health.ts', testFile: 'backend/tests/health.test.ts', verdict: 'drop', verdictReason: 'Only asserts a mock call.' },
+        { id: 'c1', name: 'reports ok', behaviour: 'b', reason: 'r', overlap: 'none', updatesExistingTest: false, sourceFile: 'backend/src/api/health.ts', testFile: 'backend/tests/health.test.ts', verdict: 'keep', verdictReason: 'ok', reviewed: true },
+        { id: 'c2', name: 'checks the query', behaviour: 'b', reason: 'r', overlap: 'none', updatesExistingTest: false, sourceFile: 'backend/src/api/health.ts', testFile: 'backend/tests/health.test.ts', verdict: 'drop', verdictReason: 'Only asserts a mock call.', reviewed: true },
       ],
       rejectedCases: [],
       skipped: [],
@@ -79,6 +79,14 @@ describe('buildRunReport', () => {
     ]);
     expect(workspace.droppedByReview).toEqual([{ sourceFile: 'backend/src/api/health.ts', name: 'checks the query', reason: 'Only asserts a mock call.' }]);
     expect(workspace.coverage.files).toEqual([{ sourceFile: 'backend/src/api/health.ts', before: coverage(0, 0), after: coverage(10, 4) }]);
+  });
+
+  it('lists kept cases the reviewer gave no verdict on', () => {
+    const decisions = result.batches[0].decisions.map((decision) => ({ ...decision, reviewed: decision.verdict === 'drop' }));
+    const unreviewed: WorkspaceResult = { ...result, batches: [{ ...result.batches[0], decisions }] };
+    const report = buildRunReport([unreviewed]);
+    expect(report.workspaces[0].keptWithoutReview).toEqual([{ testFile: 'backend/tests/health.test.ts', name: 'reports ok' }]);
+    expect(buildSummary(report)).toContain('1 planned case kept without a review verdict.');
   });
 
   it('lists the skills of the stages that ran', () => {

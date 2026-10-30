@@ -81,6 +81,14 @@ function renderWorkspace(workspace: WorkspaceReport) {
     ...workspace.revertedFiles.map((file) => `whole file restored: \`${escapeCode(file)}\``),
   ];
   if (notDone.length > 0) lines.push('### Not done', '', list(notDone, (line) => line), '');
+  if (workspace.keptWithoutReview.length > 0) {
+    lines.push(
+      '### Kept without a review verdict',
+      '',
+      list(workspace.keptWithoutReview, (kept) => `\`${escapeCode(kept.testFile)}\`: ${escapeMarkdown(kept.name)}`),
+      '',
+    );
+  }
   if (workspace.droppedByReview.length > 0 || workspace.rejectedByChecks.length > 0) {
     lines.push(
       '### Dropped cases',

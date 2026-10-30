@@ -38,6 +38,7 @@ export type WorkspaceReport = {
   existingTestsChanged: ExistingTestChange[];
   changedOutsideCases: ChangeOutsideCases[];
   droppedByReview: { sourceFile: string; name: string; reason: string }[];
+  keptWithoutReview: { testFile: string; name: string }[];
   rejectedByChecks: { name: string; reason: string }[];
   skipped: { sourceFile: string; reason: string }[];
   fullyCovered: string[];
@@ -137,6 +138,9 @@ export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {
       batch.decisions
         .filter((decision) => decision.verdict === 'drop')
         .map((decision) => ({ sourceFile: decision.sourceFile, name: decision.name, reason: decision.verdictReason })),
+    ),
+    keptWithoutReview: batches.flatMap((batch) =>
+      batch.decisions.filter((decision) => !decision.reviewed).map((decision) => ({ testFile: decision.testFile, name: decision.name })),
     ),
     rejectedByChecks: batches.flatMap((batch) => batch.rejectedCases.map(({ plannedCase, reason }) => ({ name: plannedCase.name, reason }))),
     skipped: batches.flatMap((batch) => batch.skipped),

@@ -46,6 +46,9 @@ function workspaceSummary(workspace: WorkspaceReport) {
     `Typecheck ${workspace.verify.typecheckPassed ? 'passes' : 'fails'}; ${workspace.verify.testsPassed} tests pass, ${workspace.verify.testsFailed} fail.`,
     `Coverage: statements ${percentage(workspace.coverage.before.statements)} → ${percentage(workspace.coverage.after.statements)}, branches ${percentage(workspace.coverage.before.branches)} → ${percentage(workspace.coverage.after.branches)}.`,
   ];
+  if (workspace.keptWithoutReview.length > 0) {
+    sentences.push(`${plural(workspace.keptWithoutReview.length, 'planned case')} kept without a review verdict.`);
+  }
   if (workspace.droppedByReview.length > 0) sentences.push(`Review dropped ${plural(workspace.droppedByReview.length, 'planned case')}.`);
   return `${workspace.name}: ${sentences.join(' ')}`;
 }
