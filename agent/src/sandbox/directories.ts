@@ -21,6 +21,11 @@ export async function createRunDirectories() {
   return directories;
 }
 
+export async function resetDirectory(directory: string) {
+  await rm(directory, { recursive: true, force: true });
+  await mkdir(directory);
+}
+
 export async function removeRunDirectories(directories: RunDirectories) {
   await rm(directories.root, { recursive: true, force: true });
 }

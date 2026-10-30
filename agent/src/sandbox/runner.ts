@@ -1,55 +1,63 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { userInfo } from 'node:os';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 import type { WorkspaceConfig } from '../config.ts';
-import { runProcess } from '../process.ts';
+import { createContainerName, runContainer } from './containers.ts';
+import { resetDirectory } from './directories.ts';
 import { assertRegularFile, copyRegularFiles, readJsonFile } from './files.ts';
 import { runnerImage } from './images.ts';
 import { parseVitestJsonReport } from './test-results.ts';
 
 const vitestConfigCandidates = ['vitest.config.ts', 'vitest.config.mts', 'vite.config.ts', 'vite.config.mts'];
-const wrapperConfigPath = '.testeragent/vitest.agent.ts';
+const wrapperMountPath = '/workspace/.testeragent';
+const wrapperFileName = 'vitest.agent.ts';
 const testResultsFileName = 'test-results.json';
+export const coverageFileName = 'coverage-final.json';
 const maxResultBytes = 20_000_000;
+
+type ReadOnlyMount = {
+  source: string;
+  target: string;
+};
 
 type RunnerCommand = {
   workspaceDirectory: string;
   outputDirectory: string;
+  readOnlyMounts?: ReadOnlyMount[];
   command: string;
   args?: string[];
   network: boolean;
   timeoutMilliseconds: number;
 };
 
-export function runInRunner({ workspaceDirectory, outputDirectory, command, args = [], network, timeoutMilliseconds }: RunnerCommand) {
+export function createRunnerArgs({ workspaceDirectory, outputDirectory, readOnlyMounts = [], command, args = [], network }: RunnerCommand) {
   const { uid, gid } = userInfo();
-  return runProcess(
-    'docker',
-    [
-      'run',
-      '--rm',
-      '--user',
-      `${uid}:${gid}`,
-      '--network',
-      network ? 'bridge' : 'none',
-      '--env',
-      'HOME=/tmp',
-      '--volume',
-      `${workspaceDirectory}:/workspace`,
-      '--volume',
-      `${outputDirectory}:/output`,
-      '--workdir',
-      '/workspace',
-      runnerImage,
-      'sh',
-      '-c',
-      `${command} "$@"`,
-      'sh',
-      ...args,
-    ],
-    { timeoutMilliseconds },
-  );
+  return [
+    '--user',
+    `${uid}:${gid}`,
+    '--network',
+    network ? 'bridge' : 'none',
+    '--env',
+    'HOME=/tmp',
+    '--volume',
+    `${workspaceDirectory}:/workspace`,
+    '--volume',
+    `${outputDirectory}:/output`,
+    ...readOnlyMounts.flatMap(({ source, target }) => ['--volume', `${source}:${target}:ro`]),
+    '--workdir',
+    '/workspace',
+    runnerImage,
+    'sh',
+    '-c',
+    `${command} "$@"`,
+    'sh',
+    ...args,
+  ];
+}
+
+export function runInRunner(command: RunnerCommand) {
+  return runContainer(createContainerName('runner'), createRunnerArgs(command), { timeoutMilliseconds: command.timeoutMilliseconds });
 }
 
 type PrepareRunnerWorkspaceOptions = {
@@ -99,7 +107,11 @@ async function findVitestConfig(workspaceDirectory: string) {
 }
 
 export function createVitestWrapperConfig(workspaceConfigFile: string) {
-  return `import workspaceConfig from '../${workspaceConfigFile}';
+  return `import workspaceConfig from '/workspace/${workspaceConfigFile}';
+
+if (Object.getPrototypeOf(workspaceConfig) !== Object.prototype) {
+  throw new Error('${workspaceConfigFile} must export a plain config object, not a function or a promise.');
+}
 
 const testConfig = workspaceConfig.test ?? {};
 
@@ -113,7 +125,8 @@ export default {
       ...testConfig.coverage,
       thresholds: undefined,
       reporter: ['json'],
-      reportsDirectory: '/output/coverage',
+      reportsDirectory: '/output',
+      clean: false,
     },
   },
 };
@@ -128,27 +141,37 @@ type RunTestsOptions = {
   coverage?: boolean;
 };
 
+// The wrapper lives in its own host directory, mounted read-only, so the host never writes into the tree PR code has run in.
+async function writeWrapperDirectory(workspaceConfigFile: string) {
+  const wrapperDirectory = await mkdtemp(path.join(tmpdir(), 'testeragent-wrapper-'));
+  await writeFile(path.join(wrapperDirectory, wrapperFileName), createVitestWrapperConfig(workspaceConfigFile));
+  return wrapperDirectory;
+}
+
 export async function runTests({ workspaceDirectory, outputDirectory, workspace, testFiles = [], coverage = false }: RunTestsOptions) {
   const workspaceConfigFile = await findVitestConfig(workspaceDirectory);
-  const wrapperPath = path.join(workspaceDirectory, wrapperConfigPath);
-  await mkdir(path.dirname(wrapperPath), { recursive: true });
-  await writeFile(wrapperPath, createVitestWrapperConfig(workspaceConfigFile));
-  await rm(path.join(outputDirectory, testResultsFileName), { force: true });
-  await rm(path.join(outputDirectory, 'coverage'), { recursive: true, force: true });
+  const wrapperDirectory = await writeWrapperDirectory(workspaceConfigFile);
+  await resetDirectory(outputDirectory);
 
   const coverageFlag = coverage ? ' --coverage.enabled=true' : '';
   const result = await runInRunner({
     workspaceDirectory,
     outputDirectory,
-    command: `${workspace.commands.test} --config ${wrapperConfigPath}${coverageFlag}`,
+    readOnlyMounts: [{ source: wrapperDirectory, target: wrapperMountPath }],
+    command: `${workspace.commands.test} --config ${wrapperMountPath}/${wrapperFileName}${coverageFlag}`,
     args: testFiles,
     network: false,
     timeoutMilliseconds: 600_000,
-  });
+  }).finally(() => rm(wrapperDirectory, { recursive: true, force: true }));
   const report = await readJsonFile(path.join(outputDirectory, testResultsFileName), z.unknown(), maxResultBytes).catch(
     (error: Error) => {
       throw new Error(`No test results were produced (${error.message}). Runner output: ${result.stderr.trim()}`);
     },
   );
-  return { exitCode: result.exitCode, timedOut: result.timedOut, ...parseVitestJsonReport(report) };
+  const { cases, fileErrors } = parseVitestJsonReport(report);
+  const hasFailure = fileErrors.length > 0 || cases.some((testCase) => testCase.status === 'failed');
+  if (result.exitCode !== 0 && !hasFailure) {
+    throw new Error(`Vitest exited with code ${result.exitCode} without a failing test. Runner output: ${result.stderr.trim()}`);
+  }
+  return { exitCode: result.exitCode, timedOut: result.timedOut, cases, fileErrors };
 }

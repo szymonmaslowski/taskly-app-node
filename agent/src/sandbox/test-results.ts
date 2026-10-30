@@ -52,8 +52,9 @@ export function parseVitestJsonReport(report: unknown) {
   const fileErrors: TestFileError[] = [];
   for (const fileResult of parsed.testResults) {
     const file = toWorkspaceRelativePath(fileResult.name);
-    if (fileResult.status === 'failed' && fileResult.assertionResults.length === 0) {
-      fileErrors.push({ file, message: fileResult.message ?? 'The test file failed to load.' });
+    const hasFailedCase = fileResult.assertionResults.some((assertion) => assertion.status === 'failed');
+    if (fileResult.status === 'failed' && (fileResult.message || !hasFailedCase)) {
+      fileErrors.push({ file, message: fileResult.message || 'The test file failed outside its test cases.' });
     }
     for (const assertion of fileResult.assertionResults) {
       cases.push({
