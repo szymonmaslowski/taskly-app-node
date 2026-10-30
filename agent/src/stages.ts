@@ -12,5 +12,6 @@ export const loopLimits = {
   planRounds: 2,
   fixAttempts: 4,
   lastFixModel: 'claude-opus-5-5',
-  agentParallelism: 2,
+  // Fixers share one writable staging copy, so two of them could edit the same fixture at once.
+  agentParallelism: 1,
 };

@@ -3,6 +3,8 @@ import type { Skill } from '../skills.ts';
 import type { PlannedCase } from './schemas.ts';
 
 const maxFailureMessageLength = 2_000;
+const maxFailingCasesInPrompt = 20;
+const maxTypecheckErrorsInPrompt = 40;
 
 export type TestFailure = {
   fullName: string;
@@ -53,6 +55,10 @@ function describeCase(plannedCase: PlannedCase) {
     overlap: plannedCase.overlap,
     updatesExistingTest: plannedCase.updatesExistingTest,
   };
+}
+
+function limitList<Item>(items: Item[], limit: number) {
+  return items.length > limit ? { shown: items.slice(0, limit), omitted: items.length - limit } : { shown: items, omitted: 0 };
 }
 
 function truncate(text: string) {
@@ -142,15 +148,19 @@ type FixPromptOptions = {
 };
 
 export function buildFixPrompt({ skill, readingSkill, failures, cases, attempt, maxAttempts }: FixPromptOptions) {
+  const typecheckErrors = limitList(failures.typecheckErrors, maxTypecheckErrorsInPrompt);
+  const failingCases = limitList(failures.failingCases, maxFailingCasesInPrompt);
   const report = {
     testFile: failures.testFile,
-    typecheckErrors: failures.typecheckErrors,
+    typecheckErrors: typecheckErrors.shown,
+    typecheckErrorsOmitted: typecheckErrors.omitted || undefined,
     forbiddenShortcuts: failures.bannedPatterns,
     loadError: failures.loadError ? truncate(failures.loadError) : undefined,
-    failingCases: failures.failingCases.map((failure) => ({
+    failingCases: failingCases.shown.map((failure) => ({
       name: failure.fullName,
       messages: failure.failureMessages.map(truncate),
     })),
+    failingCasesOmitted: failingCases.omitted || undefined,
   };
   return [
     `Fix the failing tests in ${failures.testFile}. This is attempt ${attempt} of ${maxAttempts}. All paths are relative to your working directory.`,
