@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createLogger } from '../src/logger.ts';
+import { createBufferedLogger, createLogger } from '../src/logger.ts';
 
 function collect(githubActions: boolean) {
   const lines: string[] = [];
@@ -34,5 +34,18 @@ describe('createLogger', () => {
     logger.untrusted('Edit tests/router.test.ts');
     logger.endStep('1 file written');
     expect(lines).toEqual(['▸ write · backend', '  Edit tests/router.test.ts', '  1 file written (1.5s)']);
+  });
+});
+
+describe('createBufferedLogger', () => {
+  it('replays a step later with the duration it really took', () => {
+    let clock = 0;
+    const buffered = createBufferedLogger(() => (clock += 2000));
+    buffered.logger.startStep('fix · attempt 1/4');
+    buffered.logger.untrusted('backend/tests/health.test.ts');
+    buffered.logger.endStep('1 files changed');
+    const { lines, logger } = collect(false);
+    buffered.flush(logger);
+    expect(lines).toEqual(['▸ fix · attempt 1/4', '  backend/tests/health.test.ts', '  1 files changed (2.0s)']);
   });
 });
