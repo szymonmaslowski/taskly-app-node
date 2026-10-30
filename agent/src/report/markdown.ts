@@ -8,6 +8,11 @@ export function escapeMarkdown(text: string) {
     .replace(/\r?\n/g, ' ');
 }
 
+// Backslash escapes are literal inside a code span, so only what can end the span or the line is replaced.
+export function escapeCode(text: string) {
+  return text.replace(/`/g, "'").replace(/\r?\n/g, ' ');
+}
+
 function percentage({ covered, total }: Fraction) {
   return total === 0 ? '–' : `${((covered / total) * 100).toFixed(1)}%`;
 }
@@ -41,7 +46,7 @@ function renderWorkspace(workspace: WorkspaceReport) {
   if (coverage.files.length > 0) {
     lines.push('| File (statements / branches) | Before | After |', '|---|---|---|');
     for (const file of coverage.files) {
-      lines.push(`| \`${escapeMarkdown(file.sourceFile)}\` | ${fileCoverageCell(file.before)} | ${fileCoverageCell(file.after)} |`);
+      lines.push(`| \`${escapeCode(file.sourceFile).replace(/\|/g, '\\|')}\` | ${fileCoverageCell(file.before)} | ${fileCoverageCell(file.after)} |`);
     }
     lines.push('');
   }
@@ -50,7 +55,7 @@ function renderWorkspace(workspace: WorkspaceReport) {
     lines.push(
       list(workspace.existingTestsChanged, (change) => {
         const flag = change.fewerAssertions ? ' **fewer assertions**' : '';
-        return `${change.kind === 'deleted' ? 'deleted' : 'changed'} \`${escapeMarkdown(change.testFile)}\`: ${escapeMarkdown(change.name)} (assertions ${change.expectsBefore} → ${change.expectsAfter})${flag}`;
+        return `${change.kind === 'deleted' ? 'deleted' : 'changed'} \`${escapeCode(change.testFile)}\`: ${escapeMarkdown(change.name)} (assertions ${change.expectsBefore} → ${change.expectsAfter})${flag}`;
       }),
       '',
     );
@@ -58,22 +63,22 @@ function renderWorkspace(workspace: WorkspaceReport) {
   if (workspace.changedOutsideCases.length > 0) {
     lines.push('### Existing test files changed outside their cases', '');
     lines.push(
-      list(workspace.changedOutsideCases, (change) => `\`${escapeMarkdown(change.testFile)}\`${change.shared ? ' **shared fixture or setup**' : ''}`),
+      list(workspace.changedOutsideCases, (change) => `\`${escapeCode(change.testFile)}\`${change.shared ? ' **shared fixture or setup**' : ''}`),
       '',
     );
   }
   if (workspace.addedCases.length > 0) {
     lines.push('### New cases', '');
     for (const file of workspace.addedCases) {
-      lines.push(`\`${escapeMarkdown(file.testFile)}\``, list(file.names, escapeMarkdown), '');
+      lines.push(`\`${escapeCode(file.testFile)}\``, list(file.names, escapeMarkdown), '');
     }
   }
   const notDone = [
-    ...workspace.failedBatches.map((failed) => `batch \`${escapeMarkdown(failed.module)}\` failed and was rolled back: ${escapeMarkdown(failed.reason)}`),
-    ...workspace.remainingFailures.map((failure) => `still failing in \`${escapeMarkdown(failure.testFile)}\`: ${failure.cases.map(escapeMarkdown).join('; ')}`),
-    ...workspace.removedCases.map((removed) => `removed after failing: \`${escapeMarkdown(removed.testFile)}\`: ${escapeMarkdown(removed.name)}`),
-    ...workspace.revertedCases.map((reverted) => `restored after failing: \`${escapeMarkdown(reverted.testFile)}\`: ${escapeMarkdown(reverted.name)}`),
-    ...workspace.revertedFiles.map((file) => `whole file restored: \`${escapeMarkdown(file)}\``),
+    ...workspace.failedBatches.map((failed) => `batch \`${escapeCode(failed.module)}\` failed and was rolled back: ${escapeMarkdown(failed.reason)}`),
+    ...workspace.remainingFailures.map((failure) => `still failing in \`${escapeCode(failure.testFile)}\`: ${failure.cases.map(escapeMarkdown).join('; ')}`),
+    ...workspace.removedCases.map((removed) => `removed after failing: \`${escapeCode(removed.testFile)}\`: ${escapeMarkdown(removed.name)}`),
+    ...workspace.revertedCases.map((reverted) => `restored after failing: \`${escapeCode(reverted.testFile)}\`: ${escapeMarkdown(reverted.name)}`),
+    ...workspace.revertedFiles.map((file) => `whole file restored: \`${escapeCode(file)}\``),
   ];
   if (notDone.length > 0) lines.push('### Not done', '', list(notDone, (line) => line), '');
   if (workspace.droppedByReview.length > 0 || workspace.rejectedByChecks.length > 0) {
@@ -81,7 +86,7 @@ function renderWorkspace(workspace: WorkspaceReport) {
       '### Dropped cases',
       '',
       lists(
-        list(workspace.droppedByReview, (dropped) => `\`${escapeMarkdown(dropped.sourceFile)}\`: ${escapeMarkdown(dropped.name)}: ${escapeMarkdown(dropped.reason)}`),
+        list(workspace.droppedByReview, (dropped) => `\`${escapeCode(dropped.sourceFile)}\`: ${escapeMarkdown(dropped.name)}: ${escapeMarkdown(dropped.reason)}`),
         list(workspace.rejectedByChecks, (rejected) => `${escapeMarkdown(rejected.name)}: ${escapeMarkdown(rejected.reason)}`),
       ),
       '',
@@ -92,8 +97,8 @@ function renderWorkspace(workspace: WorkspaceReport) {
       '### Skipped files',
       '',
       lists(
-        list(workspace.skipped, (skipped) => `\`${escapeMarkdown(skipped.sourceFile)}\`: ${escapeMarkdown(skipped.reason)}`),
-        list(workspace.fullyCovered, (file) => `\`${escapeMarkdown(file)}\`: already tested and fully covered`),
+        list(workspace.skipped, (skipped) => `\`${escapeCode(skipped.sourceFile)}\`: ${escapeMarkdown(skipped.reason)}`),
+        list(workspace.fullyCovered, (file) => `\`${escapeCode(file)}\`: already tested and fully covered`),
       ),
       '',
     );

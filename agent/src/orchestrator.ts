@@ -10,7 +10,7 @@ import { collectFailures } from './failures.ts';
 import { createBufferedLogger, type Logger } from './logger.ts';
 import { runStage, type StageSettings, type StageUsage } from './run-stage.ts';
 import { createRunDirectories, removeRunDirectories, type RunDirectories } from './sandbox/directories.ts';
-import { createMatcher, listTrackedFiles, readRegularFile } from './sandbox/files.ts';
+import { assertPrintablePaths, createMatcher, listTrackedFiles, readRegularFile } from './sandbox/files.ts';
 import { buildImages } from './sandbox/images.ts';
 import { checkRepositoryThresholds, installRunnerWorkspace, prepareRunnerWorkspace, runTests, runTypecheck } from './sandbox/runner.ts';
 import { createStagingCopy, diffStagingCopy, findDisallowedChanges, type StagingChanges, type StagingManifest } from './sandbox/staging.ts';
@@ -120,6 +120,7 @@ async function runContextStage<Schema extends z.ZodType>(context: WorkspaceConte
 
 async function checkStagingChanges(context: WorkspaceContext) {
   const changes = await diffStagingCopy(context.directories.staging, context.manifest);
+  assertPrintablePaths([...changes.added, ...changes.modified, ...changes.deleted, ...changes.symbolicLinks]);
   if (changes.symbolicLinks.length > 0) throw new Error(`The agent created symbolic links: ${changes.symbolicLinks.join(', ')}`);
   const disallowed = findDisallowedChanges(changes, context.workspace);
   if (disallowed.length > 0) throw new Error(`The agent changed files outside the writable paths: ${disallowed.join(', ')}`);

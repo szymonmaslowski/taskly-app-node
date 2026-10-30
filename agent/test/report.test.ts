@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FileCoverage } from '../src/analyze/coverage.ts';
 import type { WorkspaceResult } from '../src/orchestrator.ts';
-import { escapeMarkdown, renderMarkdownReport } from '../src/report/markdown.ts';
+import { escapeCode, escapeMarkdown, renderMarkdownReport } from '../src/report/markdown.ts';
 import { buildRunReport, summariseUsage, totalCoverage } from '../src/report/report.ts';
 import { buildSummary } from '../src/report/summary.ts';
 
@@ -92,6 +92,13 @@ describe('buildRunReport', () => {
     const markdown = renderMarkdownReport(buildRunReport([result]));
     expect(markdown.indexOf('### Existing tests changed')).toBeLessThan(markdown.indexOf('### New cases'));
     expect(markdown).toContain('**fewer assertions**');
+  });
+});
+
+describe('escapeCode', () => {
+  it('keeps underscores readable and stops a backtick from closing the span', () => {
+    expect(escapeCode('tests/foo_bar.test.ts')).toBe('tests/foo_bar.test.ts');
+    expect(escapeCode('tests/a`**b**.test.ts')).toBe("tests/a'**b**.test.ts");
   });
 });
 
