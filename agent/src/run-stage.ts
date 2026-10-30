@@ -180,6 +180,7 @@ type RunStageOptions<Schema extends z.ZodType> = {
   outputSchema: Schema;
   settings: StageSettings;
   logger: Logger;
+  maxOutputAttempts: number;
   model?: string;
   transcriptFile?: string;
 };
@@ -218,15 +219,15 @@ export async function runStage<Schema extends z.ZodType>(options: RunStageOption
   options.logger.info(`model ${model}, effort ${options.settings.effort}`);
   const usages: StageUsage[] = [];
   let prompt = options.prompt;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
+  for (let attempt = 1; attempt <= options.maxOutputAttempts; attempt += 1) {
     const result = await runAttempt(options, prompt, model);
     usages.push(result.usage);
     options.logger.info(
       `${result.usage.inputTokens + result.usage.cacheReadTokens} tokens in, ${result.usage.outputTokens} out, ${result.usage.turns} turns`,
     );
     if (result.output !== undefined) return { output: result.output, usages };
-    options.logger.info(`output rejected (attempt ${attempt} of 2)`);
+    options.logger.info(`output rejected (attempt ${attempt} of ${options.maxOutputAttempts})`);
     prompt = `${options.prompt}\n\nYour previous answer was rejected for this reason:\n${result.error}\nAnswer again, following the required output format.`;
   }
-  throw new Error(`Stage ${options.agent.name} produced no valid output after 2 attempts`);
+  throw new Error(`Stage ${options.agent.name} produced no valid output after ${options.maxOutputAttempts} attempts`);
 }
