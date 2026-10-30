@@ -30,7 +30,14 @@ export async function listTrackedFiles(repositoryRoot: string) {
     timeoutMilliseconds: 30_000,
   });
   if (result.exitCode !== 0) throw new Error(`git ls-files failed: ${result.stderr.trim()}`);
-  return result.stdout.split('\0').filter((relativePath) => relativePath.length > 0);
+  const trackedFiles = result.stdout.split('\0').filter((relativePath) => relativePath.length > 0);
+  assertPrintablePaths(trackedFiles);
+  return trackedFiles;
+}
+
+export function assertPrintablePaths(relativePaths: string[]) {
+  const unprintable = relativePaths.find((relativePath) => /[\u0000-\u001f\u007f]/.test(relativePath));
+  if (unprintable !== undefined) throw new Error(`Refusing a file path with control characters: ${JSON.stringify(unprintable)}`);
 }
 
 export async function assertRegularFile(filePath: string, relativePath: string) {

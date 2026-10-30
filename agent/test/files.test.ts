@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { SymbolicLinkError, readJsonFile, readRegularFile } from '../src/sandbox/files.ts';
+import { SymbolicLinkError, assertPrintablePaths, readJsonFile, readRegularFile } from '../src/sandbox/files.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -57,5 +57,12 @@ describe('readJsonFile', () => {
     const directory = await createDirectory();
     await writeFile(path.join(directory, 'results.json'), '{"passed":"yes"}');
     await expect(readJsonFile(path.join(directory, 'results.json'), z.object({ passed: z.boolean() }), 100)).rejects.toThrow();
+  });
+});
+
+describe('assertPrintablePaths', () => {
+  it('refuses paths with line breaks, which could inject lines into logs', () => {
+    expect(() => assertPrintablePaths(['backend/src/router.ts'])).not.toThrow();
+    expect(() => assertPrintablePaths(['backend/src/evil\n::add-mask::x.ts'])).toThrow(/control characters/);
   });
 });
