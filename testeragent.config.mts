@@ -30,6 +30,8 @@ export default defineConfig({
         'src/**/types.ts',
         'src/**/*.types.ts',
         'src/**/index.ts',
+        'src/**/constants.{ts,tsx}',
+        'src/**/*.constants.ts',
         'src/features/todos/api/queryKeys.ts',
         'src/lib/queryClient.ts',
       ],
