@@ -12,7 +12,7 @@ import { runStage, type StageSettings, type StageUsage } from './run-stage.ts';
 import { createRunDirectories, removeRunDirectories, type RunDirectories } from './sandbox/directories.ts';
 import { createMatcher, listTrackedFiles, readRegularFile } from './sandbox/files.ts';
 import { buildImages } from './sandbox/images.ts';
-import { installRunnerWorkspace, prepareRunnerWorkspace, runTests, runTypecheck } from './sandbox/runner.ts';
+import { checkRepositoryThresholds, installRunnerWorkspace, prepareRunnerWorkspace, runTests, runTypecheck } from './sandbox/runner.ts';
 import { createStagingCopy, diffStagingCopy, findDisallowedChanges, type StagingChanges, type StagingManifest } from './sandbox/staging.ts';
 import { applyStagingToRepository, syncStagingToRunner } from './sandbox/sync.ts';
 import { loadSkill, type Skill } from './skills.ts';
@@ -66,9 +66,19 @@ export type TestFileChanges = {
   changes: CaseChange[];
 };
 
+export type VerifyResult = {
+  typecheckPassed: boolean;
+  testsPassed: number;
+  testsFailed: number;
+  repositoryThresholdsPassed: boolean;
+};
+
 export type WorkspaceResult = {
   name: string;
+  skill: string;
   coverageBefore: CoverageByFile;
+  coverageAfter: CoverageByFile;
+  verify: VerifyResult;
   fullyCovered: string[];
   batches: BatchResult[];
   changes: StagingChanges;
@@ -406,6 +416,19 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
       const batchResults: BatchResult[] = [];
       for (const batch of batches) batchResults.push(await processBatch(context, batch));
 
+      logger.startStep(`verify · ${name}`);
+      const typecheck = await runTypecheck(directories.runner, directories.output, workspace);
+      const after = await measureCoverage({ runnerDirectory: directories.runner, outputDirectory: directories.output, workspace });
+      const verify: VerifyResult = {
+        typecheckPassed: typecheck.passed,
+        testsPassed: after.testRun.cases.filter((testCase) => testCase.status === 'passed').length,
+        testsFailed: after.testRun.cases.filter((testCase) => testCase.status === 'failed').length + after.testRun.fileErrors.length,
+        repositoryThresholdsPassed: await checkRepositoryThresholds(directories.runner, directories.output, workspace),
+      };
+      logger.endStep(
+        `typecheck ${verify.typecheckPassed ? 'passed' : 'failed'}, ${verify.testsPassed} passed, ${verify.testsFailed} failed, repository thresholds ${verify.repositoryThresholdsPassed ? 'met' : 'not met'}`,
+      );
+
       const changes = await diffStagingCopy(directories.staging, manifest);
       const testFileChanges: TestFileChanges[] = [];
       for (const testFile of [...changes.added, ...changes.modified, ...changes.deleted]) {
@@ -415,7 +438,10 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
       await applyStagingToRepository(directories.staging, repositoryRoot, changes);
       results.push({
         name,
+        skill: workspace.skill,
         coverageBefore: coverage,
+        coverageAfter: after.coverage,
+        verify,
         fullyCovered: work.fullyCovered,
         batches: batchResults,
         changes,
@@ -426,5 +452,5 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
       await removeRunDirectories(directories);
     }
   }
-  return results;
+  return { results, runDirectory: transcriptDirectory };
 }
