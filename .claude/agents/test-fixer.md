@@ -1,6 +1,5 @@
 ---
 description: Fixes failing unit tests without weakening them
-model: claude-sonnet-5-5
 tools: Read, Grep, Glob, Edit, Write
 ---
 

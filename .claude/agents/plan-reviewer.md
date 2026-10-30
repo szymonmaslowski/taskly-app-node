@@ -1,6 +1,5 @@
 ---
 description: Reviews a test plan and keeps only the cases worth writing
-model: claude-opus-5-5
 tools: Read, Grep, Glob
 ---
 

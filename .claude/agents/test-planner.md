@@ -1,6 +1,5 @@
 ---
 description: Plans the unit test cases worth writing for a set of source files
-model: claude-sonnet-5-5
 tools: Read, Grep, Glob
 ---
 

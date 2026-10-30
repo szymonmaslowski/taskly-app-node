@@ -1,6 +1,5 @@
 ---
 description: Writes the approved unit test cases into test files
-model: claude-sonnet-5-5
 tools: Read, Grep, Glob, Edit, Write
 ---
 
