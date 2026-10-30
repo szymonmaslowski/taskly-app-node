@@ -77,7 +77,7 @@ export type VerifyResult = {
   typecheckPassed: boolean;
   testsPassed: number;
   testsFailed: number;
-  repositoryThresholdsPassed: boolean;
+  repositoryThresholds: 'met' | 'not met' | 'not checked';
 };
 
 export type WorkspaceResult = {
@@ -86,6 +86,7 @@ export type WorkspaceResult = {
   coverageBefore: CoverageByFile;
   coverageAfter: CoverageByFile;
   verify: VerifyResult;
+  applied: boolean;
   fullyCovered: string[];
   batches: BatchResult[];
   changes: StagingChanges;
@@ -520,14 +521,18 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
       logger.startStep(`verify · ${name}`);
       const typecheck = await runTypecheck(directories.runner, directories.output, workspace);
       const after = await measureCoverage({ runnerDirectory: directories.runner, outputDirectory: directories.output, workspace });
+      const testsFailed = after.testRun.cases.filter((testCase) => testCase.status === 'failed').length + after.testRun.fileErrors.length;
+      const suitePassed = typecheck.passed && testsFailed === 0;
+      // The thresholds run the repository's own test command, so a failing suite would read as thresholds not met.
+      const thresholdsMet = suitePassed && (await checkRepositoryThresholds(directories.runner, directories.output, workspace));
       const verify: VerifyResult = {
         typecheckPassed: typecheck.passed,
         testsPassed: after.testRun.cases.filter((testCase) => testCase.status === 'passed').length,
-        testsFailed: after.testRun.cases.filter((testCase) => testCase.status === 'failed').length + after.testRun.fileErrors.length,
-        repositoryThresholdsPassed: await checkRepositoryThresholds(directories.runner, directories.output, workspace),
+        testsFailed,
+        repositoryThresholds: suitePassed ? (thresholdsMet ? 'met' : 'not met') : 'not checked',
       };
       logger.endStep(
-        `typecheck ${verify.typecheckPassed ? 'passed' : 'failed'}, ${verify.testsPassed} passed, ${verify.testsFailed} failed, repository thresholds ${verify.repositoryThresholdsPassed ? 'met' : 'not met'}`,
+        `typecheck ${verify.typecheckPassed ? 'passed' : 'failed'}, ${verify.testsPassed} passed, ${verify.testsFailed} failed, repository thresholds ${verify.repositoryThresholds}`,
       );
 
       const changes = await diffStagingCopy(directories.staging, manifest);
@@ -537,13 +542,15 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
         if (fileChanges.length > 0) testFileChanges.push({ testFile, changes: fileChanges });
       }
       const changedOutsideCases = await findChangesOutsideCases(context, changes.modified);
-      await applyStagingToRepository(directories.staging, repositoryRoot, changes);
+      if (suitePassed) await applyStagingToRepository(directories.staging, repositoryRoot, changes);
+      else logger.info(`${name}: verify failed, so the changes were not applied`);
       results.push({
         name,
         skill: workspace.skill,
         coverageBefore: coverage,
         coverageAfter: after.coverage,
         verify,
+        applied: suitePassed,
         fullyCovered: work.fullyCovered,
         batches: batchResults,
         changes,

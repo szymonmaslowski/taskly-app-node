@@ -27,9 +27,10 @@ function lists(...renderedLists: string[]) {
 
 function renderWorkspace(workspace: WorkspaceReport) {
   const lines: string[] = [`## ${escapeMarkdown(workspace.name)}`, ''];
+  if (!workspace.applied) lines.push('**The changes were not applied, because verify failed.**', '');
   const { verify, coverage } = workspace;
   lines.push(
-    `Typecheck ${verify.typecheckPassed ? 'passed' : 'failed'}. Tests: ${verify.testsPassed} passed, ${verify.testsFailed} failed. Repository coverage thresholds ${verify.repositoryThresholdsPassed ? 'met' : 'not met'}.`,
+    `Typecheck ${verify.typecheckPassed ? 'passed' : 'failed'}. Tests: ${verify.testsPassed} passed, ${verify.testsFailed} failed. Repository coverage thresholds ${verify.repositoryThresholds}.`,
     '',
     '| Coverage | Before | After |',
     '|---|---|---|',

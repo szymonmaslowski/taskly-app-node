@@ -10,6 +10,7 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`) {
 
 function attentionSentences(workspace: WorkspaceReport) {
   const sentences: string[] = [];
+  if (!workspace.applied) sentences.push('Verify failed, so the changes were not applied.');
   const stillFailing = workspace.remainingFailures.length;
   if (stillFailing > 0) sentences.push(`${plural(stillFailing, 'test file')} still ${stillFailing === 1 ? 'fails' : 'fail'}.`);
   const fewerAssertions = workspace.existingTestsChanged.filter((change) => change.fewerAssertions).length;

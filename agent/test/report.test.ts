@@ -21,7 +21,8 @@ const result: WorkspaceResult = {
   skill: 'backend-unit-tests',
   coverageBefore: new Map([['backend/src/api/health.ts', coverage(0, 0)]]),
   coverageAfter: new Map([['backend/src/api/health.ts', coverage(10, 4)]]),
-  verify: { typecheckPassed: true, testsPassed: 50, testsFailed: 0, repositoryThresholdsPassed: true },
+  verify: { typecheckPassed: true, testsPassed: 50, testsFailed: 0, repositoryThresholds: 'met' },
+  applied: true,
   fullyCovered: [],
   batches: [
     {
@@ -120,7 +121,8 @@ describe('buildSummary', () => {
         },
       ],
     };
-    const summary = buildSummary(buildRunReport([failing]));
+    const summary = buildSummary(buildRunReport([{ ...failing, applied: false }]));
+    expect(summary).toMatch(/^backend: Verify failed, so the changes were not applied\./);
     expect(summary).toContain('1 test file still fails.');
     expect(summary).toContain('After failing, 1 new case was removed.');
     expect(summary).toContain('no existing test changed');

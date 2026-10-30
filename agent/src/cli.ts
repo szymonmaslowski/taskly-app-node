@@ -38,3 +38,4 @@ await writeFile(path.join(runDirectory, 'report.json'), `${JSON.stringify(report
 await writeFile(path.join(runDirectory, 'report.md'), renderMarkdownReport(report));
 for (const paragraph of report.summary.split('\n\n')) logger.info(paragraph);
 logger.info(`Report: ${path.relative(process.cwd(), path.join(runDirectory, 'report.md'))}`);
+if (results.some((result) => !result.applied)) process.exitCode = 1;

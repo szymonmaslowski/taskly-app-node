@@ -28,6 +28,7 @@ export type WorkspaceReport = {
   name: string;
   skillsUsed: string[];
   verify: VerifyResult;
+  applied: boolean;
   coverage: {
     before: CoverageTotals;
     after: CoverageTotals;
@@ -100,6 +101,7 @@ export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {
     name: result.name,
     skillsUsed: [result.skill, 'reading-test-results'],
     verify: result.verify,
+    applied: result.applied,
     coverage: {
       before: totalCoverage(result.coverageBefore),
       after: totalCoverage(result.coverageAfter),
