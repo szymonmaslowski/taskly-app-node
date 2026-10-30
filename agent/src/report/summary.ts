@@ -17,6 +17,12 @@ function attentionSentences(workspace: WorkspaceReport) {
     const detail = fewerAssertions > 0 ? `, ${fewerAssertions} with fewer assertions` : '';
     sentences.push(`${plural(workspace.existingTestsChanged.length, 'existing test')} changed${detail}; check those first.`);
   }
+  const outside = workspace.changedOutsideCases.length;
+  if (outside > 0) {
+    const shared = workspace.changedOutsideCases.filter((change) => change.shared).length;
+    const detail = shared > 0 ? `, ${shared} of them shared fixtures or setup` : '';
+    sentences.push(`${plural(outside, 'existing test file')} changed outside ${outside === 1 ? 'its' : 'their'} cases${detail}; check those too.`);
+  }
   const cleanups = [
     [workspace.removedCases.length, 'new case', 'removed'],
     [workspace.revertedCases.length, 'changed case', 'restored'],

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractTestCases, findBannedPatterns, newBannedPatterns } from '../src/tests/test-cases.ts';
-import { compareTestFile, findCasesByRuntimeNames, matchFailingCases, matchesCaseName, removeCases, revertCases } from '../src/tests/test-changes.ts';
+import { changesOutsideCases, compareTestFile, findCasesByRuntimeNames, matchFailingCases, matchesCaseName, removeCases, revertCases } from '../src/tests/test-changes.ts';
 
 const original = `import { it, expect } from 'vitest';
 import { fromModel } from '../src/mappers.ts';
@@ -35,6 +35,20 @@ describe('compareTestFile', () => {
       { kind: 'added', name: 'rejects invalid data', expectCount: 1, before: undefined, after: undefined },
       { kind: 'deleted', name: 'dates keeps due date %s', expectCount: 1, before: undefined, after: undefined },
     ]);
+  });
+});
+
+describe('changesOutsideCases', () => {
+  it('ignores new cases, new describe blocks and new imports', () => {
+    const changed = `import { toModel } from '../src/mappers.ts';\n${original}describe('toModel', () => {\n  it('maps back', () => {});\n});\n`;
+    expect(changesOutsideCases('mappers.test.ts', original, changed)).toBe(false);
+  });
+
+  it.each([
+    ['a changed mock factory', "vi.mock('../src/api.ts', () => ({ list: vi.fn() }));\n", "vi.mock('../src/api.ts', () => ({ list: vi.fn(() => []) }));\n"],
+    ['a changed hook inside a describe', "describe('x', () => {\n  beforeEach(() => reset());\n});\n", "describe('x', () => {\n  beforeEach(() => {});\n});\n"],
+  ])('reports %s', (_description, before, after) => {
+    expect(changesOutsideCases('cases.test.ts', before, after)).toBe(true);
   });
 });
 

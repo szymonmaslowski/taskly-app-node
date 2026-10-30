@@ -48,6 +48,7 @@ const result: WorkspaceResult = {
       changes: [{ kind: 'modified', name: 'lists tasks', expectsBefore: 3, expectsAfter: 1, before: 'a', after: 'b' }],
     },
   ],
+  changedOutsideCases: [],
   usages: [usage, { ...usage, costUsd: 0.2 }],
 };
 
@@ -77,6 +78,13 @@ describe('buildRunReport', () => {
     ]);
     expect(workspace.droppedByReview).toEqual([{ sourceFile: 'backend/src/api/health.ts', name: 'checks the query', reason: 'Only asserts a mock call.' }]);
     expect(workspace.coverage.files).toEqual([{ sourceFile: 'backend/src/api/health.ts', before: coverage(0, 0), after: coverage(10, 4) }]);
+  });
+
+  it('flags test files changed outside their cases, shared ones loudest', () => {
+    const changed: WorkspaceResult = { ...result, changedOutsideCases: [{ testFile: 'backend/tests/fixture.ts', shared: true }] };
+    const report = buildRunReport([changed]);
+    expect(renderMarkdownReport(report)).toContain('`backend/tests/fixture.ts` **shared fixture or setup**');
+    expect(buildSummary(report)).toContain('1 existing test file changed outside its cases, 1 of them shared fixtures or setup; check those too.');
   });
 
   it('renders the changed existing tests before the new cases', () => {

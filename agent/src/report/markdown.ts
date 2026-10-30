@@ -54,6 +54,13 @@ function renderWorkspace(workspace: WorkspaceReport) {
       '',
     );
   }
+  if (workspace.changedOutsideCases.length > 0) {
+    lines.push('### Existing test files changed outside their cases', '');
+    lines.push(
+      list(workspace.changedOutsideCases, (change) => `\`${escapeMarkdown(change.testFile)}\`${change.shared ? ' **shared fixture or setup**' : ''}`),
+      '',
+    );
+  }
   if (workspace.addedCases.length > 0) {
     lines.push('### New cases', '');
     for (const file of workspace.addedCases) {

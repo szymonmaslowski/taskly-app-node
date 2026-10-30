@@ -21,7 +21,7 @@ import { applyReview, numberCases, partitionPlannedCases, type CaseDecision } fr
 import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt, type FileFailures } from './stages/prompts.ts';
 import { fixOutputSchema, planOutputSchema, reviewOutputSchema, writeOutputSchema, type PlannedCase } from './stages/schemas.ts';
 import { loopLimits, stageSettings } from './stages.ts';
-import { compareTestFile, findCasesByRuntimeNames, matchFailingCases, removeCases, revertCases, type CaseChange } from './tests/test-changes.ts';
+import { changesOutsideCases, compareTestFile, findCasesByRuntimeNames, matchFailingCases, removeCases, revertCases, type CaseChange } from './tests/test-changes.ts';
 import { findBannedPatterns, newBannedPatterns } from './tests/test-cases.ts';
 
 const maxRepositoryFileBytes = 2_000_000;
@@ -68,6 +68,11 @@ export type TestFileChanges = {
   changes: CaseChange[];
 };
 
+export type ChangeOutsideCases = {
+  testFile: string;
+  shared: boolean;
+};
+
 export type VerifyResult = {
   typecheckPassed: boolean;
   testsPassed: number;
@@ -85,6 +90,7 @@ export type WorkspaceResult = {
   batches: BatchResult[];
   changes: StagingChanges;
   testFileChanges: TestFileChanges[];
+  changedOutsideCases: ChangeOutsideCases[];
   usages: StageUsage[];
 };
 
@@ -432,6 +438,19 @@ async function processBatch(context: WorkspaceContext, batch: WorkBatch): Promis
   return { ...result, fixAttempts: fixed.attempts, fixerNotes: fixed.notes, ...cleanup };
 }
 
+async function findChangesOutsideCases(context: WorkspaceContext, modifiedFiles: string[]) {
+  const isTestFile = createMatcher(context.workspace.root, context.workspace.tests);
+  const isShared = createMatcher(context.workspace.root, context.workspace.shared);
+  const found: ChangeOutsideCases[] = [];
+  for (const modifiedFile of modifiedFiles) {
+    const before = await readOriginalFile(context, modifiedFile);
+    const after = await readStagedFile(context, modifiedFile);
+    if (before === undefined || after === undefined || !changesOutsideCases(modifiedFile, before, after)) continue;
+    found.push({ testFile: modifiedFile, shared: isShared(modifiedFile) || !isTestFile(modifiedFile) });
+  }
+  return found;
+}
+
 type RunRepositoryModeOptions = {
   repositoryRoot: string;
   logger: Logger;
@@ -517,6 +536,7 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
         const fileChanges = compareTestFile(testFile, await readOriginalFile(context, testFile), await readStagedFile(context, testFile));
         if (fileChanges.length > 0) testFileChanges.push({ testFile, changes: fileChanges });
       }
+      const changedOutsideCases = await findChangesOutsideCases(context, changes.modified);
       await applyStagingToRepository(directories.staging, repositoryRoot, changes);
       results.push({
         name,
@@ -528,6 +548,7 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
         batches: batchResults,
         changes,
         testFileChanges,
+        changedOutsideCases,
         usages: context.usages,
       });
     } finally {

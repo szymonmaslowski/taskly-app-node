@@ -101,6 +101,30 @@ export function extractTestCases(fileName: string, content: string) {
   return cases;
 }
 
+function callbackBody(call: ts.CallExpression) {
+  const callback = call.arguments.find((argument) => ts.isArrowFunction(argument) || ts.isFunctionExpression(argument));
+  return callback && ts.isBlock(callback.body) ? callback.body : undefined;
+}
+
+// Imports are left out: new cases routinely add them, and they don't change how existing cases run.
+export function extractCodeOutsideCases(fileName: string, content: string) {
+  const sourceFile = parse(fileName, content);
+  const pieces: string[] = [];
+  const visitStatements = (statements: ts.NodeArray<ts.Statement>) => {
+    for (const statement of statements) {
+      if (ts.isImportDeclaration(statement)) continue;
+      const call = ts.isExpressionStatement(statement) && ts.isCallExpression(statement.expression) ? statement.expression : undefined;
+      const rootName = call ? calleeRootName(call.expression) : undefined;
+      if (rootName && caseFunctions.has(rootName)) continue;
+      const describeBody = call && rootName === 'describe' ? callbackBody(call) : undefined;
+      if (describeBody) visitStatements(describeBody.statements);
+      else pieces.push(statement.getText(sourceFile));
+    }
+  };
+  visitStatements(sourceFile.statements);
+  return pieces;
+}
+
 type BannedPatternOptions = {
   fileName: string;
   content: string;

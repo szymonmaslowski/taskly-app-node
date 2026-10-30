@@ -1,5 +1,5 @@
 import type { CoverageByFile, FileCoverage } from '../analyze/coverage.ts';
-import type { VerifyResult, WorkspaceResult } from '../orchestrator.ts';
+import type { ChangeOutsideCases, VerifyResult, WorkspaceResult } from '../orchestrator.ts';
 import type { StageUsage } from '../run-stage.ts';
 
 export type Fraction = { covered: number; total: number };
@@ -35,6 +35,7 @@ export type WorkspaceReport = {
   };
   addedCases: { testFile: string; names: string[] }[];
   existingTestsChanged: ExistingTestChange[];
+  changedOutsideCases: ChangeOutsideCases[];
   droppedByReview: { sourceFile: string; name: string; reason: string }[];
   rejectedByChecks: { name: string; reason: string }[];
   skipped: { sourceFile: string; reason: string }[];
@@ -122,6 +123,7 @@ export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {
         return [];
       }),
     ),
+    changedOutsideCases: result.changedOutsideCases,
     droppedByReview: batches.flatMap((batch) =>
       batch.decisions
         .filter((decision) => decision.verdict === 'drop')

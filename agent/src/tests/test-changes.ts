@@ -1,4 +1,4 @@
-import { extractTestCases, type TestCase } from './test-cases.ts';
+import { extractCodeOutsideCases, extractTestCases, type TestCase } from './test-cases.ts';
 
 export type CaseChange =
   | { kind: 'added'; name: string; expectCount: number }
@@ -33,6 +33,10 @@ export function compareTestFile(fileName: string, before: string | undefined, af
     if (!casesAfter.has(name)) changes.push({ kind: 'deleted', name, expectCount: caseBefore.expectCount });
   }
   return changes;
+}
+
+export function changesOutsideCases(fileName: string, before: string, after: string) {
+  return extractCodeOutsideCases(fileName, before).join('\n') !== extractCodeOutsideCases(fileName, after).join('\n');
 }
 
 function escapeForPattern(text: string) {
