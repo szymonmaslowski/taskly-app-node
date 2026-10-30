@@ -81,6 +81,12 @@ describe('buildRunReport', () => {
     expect(workspace.coverage.files).toEqual([{ sourceFile: 'backend/src/api/health.ts', before: coverage(0, 0), after: coverage(10, 4) }]);
   });
 
+  it('lists the skills of the stages that ran', () => {
+    expect(buildRunReport([result]).workspaces[0].skillsUsed).toEqual(['backend-unit-tests']);
+    const fixed: WorkspaceResult = { ...result, batches: [{ ...result.batches[0], fixAttempts: 1 }] };
+    expect(buildRunReport([fixed]).workspaces[0].skillsUsed).toEqual(['backend-unit-tests', 'reading-test-results']);
+  });
+
   it('flags test files changed outside their cases, shared ones loudest', () => {
     const changed: WorkspaceResult = { ...result, changedOutsideCases: [{ testFile: 'backend/tests/fixture.ts', shared: true }] };
     const report = buildRunReport([changed]);

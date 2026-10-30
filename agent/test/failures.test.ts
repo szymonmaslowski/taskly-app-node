@@ -15,6 +15,8 @@ describe('collectFailures', () => {
       typecheckOutput: [
         "tests/health.test.ts(4,7): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.",
         'src/other.ts(1,1): error TS1000: unrelated',
+        "tests/health.test.ts(9,3): error TS2741: Property 'id' is missing in type '{}' but required in type 'Todo'.",
+        "  src/types.ts(2,3): 'id' is declared here.",
       ].join('\n'),
     });
     expect(failures).toEqual([
@@ -22,7 +24,10 @@ describe('collectFailures', () => {
         testFile: 'backend/tests/health.test.ts',
         failingCases: [{ fullName: 'fails', failureMessages: ['expected 500'] }],
         loadError: undefined,
-        typecheckErrors: ["tests/health.test.ts(4,7): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'."],
+        typecheckErrors: [
+          "tests/health.test.ts(4,7): error TS2345: Argument of type 'string' is not assignable to parameter of type 'number'.",
+          "tests/health.test.ts(9,3): error TS2741: Property 'id' is missing in type '{}' but required in type 'Todo'.\n  src/types.ts(2,3): 'id' is declared here.",
+        ],
         bannedPatterns: [],
       },
       { testFile: 'backend/tests/config.test.ts', failingCases: [], loadError: 'Cannot find module', typecheckErrors: [], bannedPatterns: [] },

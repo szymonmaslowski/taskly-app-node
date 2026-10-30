@@ -104,7 +104,7 @@ function renderWorkspace(workspace: WorkspaceReport) {
     );
   }
   if (workspace.fixerNotes.length > 0) lines.push('### Notes from the fixer', '', list(workspace.fixerNotes, escapeMarkdown), '');
-  lines.push(`Skills: ${workspace.skillsUsed.map((skill) => `\`${skill}\``).join(', ')}`, '');
+  if (workspace.skillsUsed.length > 0) lines.push(`Skills: ${workspace.skillsUsed.map((skill) => `\`${skill}\``).join(', ')}`, '');
   return lines.join('\n');
 }
 

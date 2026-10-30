@@ -22,6 +22,12 @@ if (values.mode !== 'repo') {
   process.exit(2);
 }
 
+const maxBatches = values['max-batches'] === undefined ? undefined : Number(values['max-batches']);
+if (maxBatches !== undefined && (!Number.isInteger(maxBatches) || maxBatches < 1)) {
+  console.error(`--max-batches must be a positive whole number, got "${values['max-batches']}".`);
+  process.exit(2);
+}
+
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const logger = createLogger({ githubActions: process.env.GITHUB_ACTIONS === 'true' });
 const { results, runDirectory } = await runRepositoryMode({
@@ -29,7 +35,7 @@ const { results, runDirectory } = await runRepositoryMode({
   logger,
   workspaceNames: values.workspace,
   modulePrefix: values.module,
-  maxBatches: values['max-batches'] ? Number(values['max-batches']) : undefined,
+  maxBatches,
 });
 
 const report = buildRunReport(results);

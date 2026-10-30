@@ -96,11 +96,17 @@ function changedSourceFiles(result: WorkspaceResult) {
   ].sort();
 }
 
+function usedSkills(result: WorkspaceResult) {
+  if (result.batches.length === 0) return [];
+  const fixerRan = result.batches.some((batch) => batch.fixAttempts > 0);
+  return fixerRan ? [result.skill, 'reading-test-results'] : [result.skill];
+}
+
 export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {
   const batches = result.batches;
   return {
     name: result.name,
-    skillsUsed: [result.skill, 'reading-test-results'],
+    skillsUsed: usedSkills(result),
     verify: result.verify,
     applied: result.applied,
     coverage: {
