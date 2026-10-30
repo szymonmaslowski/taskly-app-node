@@ -45,6 +45,7 @@ export type WorkspaceReport = {
   revertedCases: { testFile: string; name: string }[];
   revertedFiles: string[];
   remainingFailures: { testFile: string; cases: string[] }[];
+  failedBatches: { module: string; reason: string }[];
   fixerNotes: string[];
 };
 
@@ -140,6 +141,7 @@ export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {
     remainingFailures: batches.flatMap((batch) =>
       batch.remainingFailures.map((failure) => ({ testFile: failure.testFile, cases: failure.failingCases.map((failingCase) => failingCase.fullName) })),
     ),
+    failedBatches: batches.flatMap((batch) => (batch.error === undefined ? [] : [{ module: batch.module, reason: batch.error }])),
     fixerNotes: batches.flatMap((batch) => batch.fixerNotes),
   };
 }

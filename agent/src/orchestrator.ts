@@ -61,6 +61,7 @@ export type BatchResult = {
   revertedCases: { testFile: string; name: string }[];
   revertedFiles: string[];
   fixerNotes: string[];
+  error?: string;
 };
 
 export type TestFileChanges = {
@@ -330,11 +331,15 @@ async function fixFailures(context: WorkspaceContext, batchStart: BatchSnapshot,
   return { failures, attempts: attempt, notes };
 }
 
+async function writeStagedFile(context: WorkspaceContext, repositoryPath: string, content: string | undefined) {
+  const stagedPath = path.join(context.directories.staging, repositoryPath);
+  if (content === undefined) return rm(stagedPath, { force: true });
+  await mkdir(path.dirname(stagedPath), { recursive: true });
+  await writeFile(stagedPath, content);
+}
+
 async function restoreFile(context: WorkspaceContext, testFile: string) {
-  const original = await readOriginalFile(context, testFile);
-  const stagedPath = path.join(context.directories.staging, testFile);
-  if (original === undefined) await rm(stagedPath, { force: true });
-  else await writeFile(stagedPath, original);
+  await writeStagedFile(context, testFile, await readOriginalFile(context, testFile));
 }
 
 function isFileBroken(failure: FileFailures) {
@@ -403,7 +408,22 @@ async function cleanUpRemainingFailures(context: WorkspaceContext, batchStart: B
   return { ...cleanup, remainingFailures: remaining };
 }
 
-async function processBatch(context: WorkspaceContext, batch: WorkBatch): Promise<BatchResult> {
+function emptyBatchResult(module: string): BatchResult {
+  return {
+    module,
+    decisions: [],
+    rejectedCases: [],
+    skipped: [],
+    fixAttempts: 0,
+    remainingFailures: [],
+    removedCases: [],
+    revertedCases: [],
+    revertedFiles: [],
+    fixerNotes: [],
+  };
+}
+
+async function processBatch(context: WorkspaceContext, batch: WorkBatch, batchStart: BatchSnapshot): Promise<BatchResult> {
   const planned = await planBatch(context, batch);
   const keptCases = planned.decisions.filter((decision) => decision.verdict === 'keep');
   const result: BatchResult = {
@@ -422,7 +442,6 @@ async function processBatch(context: WorkspaceContext, batch: WorkBatch): Promis
     if (!testedFiles.includes(keptCase.sourceFile)) context.testedFilesByTest.set(keptCase.testFile, [...testedFiles, keptCase.sourceFile]);
   }
 
-  const batchStart = await readChangedFiles(context);
   context.logger.startStep(`write · ${batch.module}`);
   const written = await runContextStage(context, {
     agent: context.agents.writer,
@@ -450,6 +469,30 @@ async function findChangesOutsideCases(context: WorkspaceContext, modifiedFiles:
     found.push({ testFile: modifiedFile, shared: isShared(modifiedFile) || !isTestFile(modifiedFile) });
   }
   return found;
+}
+
+async function restoreBatchStart(context: WorkspaceContext, batchStart: BatchSnapshot) {
+  const changes = await diffStagingCopy(context.directories.staging, context.manifest);
+  for (const symbolicLink of changes.symbolicLinks) await rm(path.join(context.directories.staging, symbolicLink), { force: true });
+  for (const changedPath of new Set([...changes.added, ...changes.modified, ...changes.deleted, ...batchStart.keys()])) {
+    if (batchStart.has(changedPath)) await writeStagedFile(context, changedPath, batchStart.get(changedPath));
+    else await restoreFile(context, changedPath);
+  }
+  await checkStagingChanges(context);
+}
+
+// One failing batch must not lose the work of the others, so its files go back to where the batch started and the run carries on.
+async function processBatchOrRollBack(context: WorkspaceContext, batch: WorkBatch) {
+  const batchStart = await readChangedFiles(context);
+  try {
+    return await processBatch(context, batch, batchStart);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    context.logger.untrusted(`batch ${batch.module} failed: ${reason}`);
+    await restoreBatchStart(context, batchStart);
+    context.logger.endStep('batch rolled back');
+    return { ...emptyBatchResult(batch.module), error: reason };
+  }
 }
 
 type RunRepositoryModeOptions = {
@@ -516,7 +559,7 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
         usages: [],
       };
       const batchResults: BatchResult[] = [];
-      for (const batch of batches) batchResults.push(await processBatch(context, batch));
+      for (const batch of batches) batchResults.push(await processBatchOrRollBack(context, batch));
 
       logger.startStep(`verify · ${name}`);
       const typecheck = await runTypecheck(directories.runner, directories.output, workspace);

@@ -119,12 +119,14 @@ describe('buildSummary', () => {
           remainingFailures: [{ testFile: 'backend/tests/health.test.ts', failingCases: [], typecheckErrors: [], bannedPatterns: [] }],
           removedCases: [{ testFile: 'backend/tests/health.test.ts', name: 'reports ok' }],
         },
+        { ...result.batches[0], module: 'backend/src/core', decisions: [], error: 'Stage test-writer timed out after 15 minutes' },
       ],
     };
     const summary = buildSummary(buildRunReport([{ ...failing, applied: false }]));
     expect(summary).toMatch(/^backend: Verify failed, so the changes were not applied\./);
     expect(summary).toContain('1 test file still fails.');
     expect(summary).toContain('After failing, 1 new case was removed.');
+    expect(summary).toContain('1 batch failed and was rolled back.');
     expect(summary).toContain('no existing test changed');
   });
 });

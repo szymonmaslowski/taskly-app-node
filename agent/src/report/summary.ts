@@ -11,6 +11,8 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`) {
 function attentionSentences(workspace: WorkspaceReport) {
   const sentences: string[] = [];
   if (!workspace.applied) sentences.push('Verify failed, so the changes were not applied.');
+  const failedBatches = workspace.failedBatches.length;
+  if (failedBatches > 0) sentences.push(`${plural(failedBatches, 'batch', 'batches')} failed and ${failedBatches === 1 ? 'was' : 'were'} rolled back.`);
   const stillFailing = workspace.remainingFailures.length;
   if (stillFailing > 0) sentences.push(`${plural(stillFailing, 'test file')} still ${stillFailing === 1 ? 'fails' : 'fail'}.`);
   const fewerAssertions = workspace.existingTestsChanged.filter((change) => change.fewerAssertions).length;

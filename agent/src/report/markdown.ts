@@ -69,6 +69,7 @@ function renderWorkspace(workspace: WorkspaceReport) {
     }
   }
   const notDone = [
+    ...workspace.failedBatches.map((failed) => `batch \`${escapeMarkdown(failed.module)}\` failed and was rolled back: ${escapeMarkdown(failed.reason)}`),
     ...workspace.remainingFailures.map((failure) => `still failing in \`${escapeMarkdown(failure.testFile)}\`: ${failure.cases.map(escapeMarkdown).join('; ')}`),
     ...workspace.removedCases.map((removed) => `removed after failing: \`${escapeMarkdown(removed.testFile)}\`: ${escapeMarkdown(removed.name)}`),
     ...workspace.revertedCases.map((reverted) => `restored after failing: \`${escapeMarkdown(reverted.testFile)}\`: ${escapeMarkdown(reverted.name)}`),
