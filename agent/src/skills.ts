@@ -12,8 +12,15 @@ export function parseSkill(name: string, content: string): Skill {
   return { name, instructions: match[1].trim() };
 }
 
+function readSkillFile(trustedRepositoryRoot: string, name: string, file: string) {
+  return readFile(path.join(trustedRepositoryRoot, '.claude', 'skills', name, file), 'utf8');
+}
+
 // Skills go into the prompts, so they must come from the base checkout, never the PR head.
 export async function loadSkill(trustedRepositoryRoot: string, name: string) {
-  const content = await readFile(path.join(trustedRepositoryRoot, '.claude', 'skills', name, 'SKILL.md'), 'utf8');
-  return parseSkill(name, content);
+  return parseSkill(name, await readSkillFile(trustedRepositoryRoot, name, 'SKILL.md'));
+}
+
+export async function loadSkillReference(trustedRepositoryRoot: string, name: string, file: string): Promise<Skill> {
+  return { name: `${name}/${file}`, instructions: (await readSkillFile(trustedRepositoryRoot, name, file)).trim() };
 }
