@@ -11,6 +11,7 @@ describe('createVitestWrapperConfig', () => {
     expect(wrapper).toContain("outputFile: '/output/test-results.json'");
     expect(wrapper).toContain('thresholds: undefined');
     expect(wrapper).toContain("reportsDirectory: '/output'");
+    expect(wrapper).toContain('reportOnFailure: true');
   });
 });
 

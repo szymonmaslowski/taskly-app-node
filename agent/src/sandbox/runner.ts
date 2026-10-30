@@ -126,6 +126,7 @@ export default {
       thresholds: undefined,
       reporter: ['json'],
       reportsDirectory: '/output',
+      reportOnFailure: true,
       clean: false,
     },
   },
