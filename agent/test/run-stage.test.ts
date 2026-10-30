@@ -12,7 +12,6 @@ import {
 const reviewer: AgentDefinition = {
   name: 'plan-reviewer',
   description: 'Reviews plans',
-  model: 'claude-opus-5-5',
   tools: ['Read', 'Grep', 'Glob'],
   systemPrompt: 'You review plans.',
 };

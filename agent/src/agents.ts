@@ -2,9 +2,9 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 
-const agentFrontmatterSchema = z.object({
+// Models are chosen per stage by the orchestrator, so a model in an agent file is rejected rather than silently ignored.
+const agentFrontmatterSchema = z.strictObject({
   description: z.string().min(1),
-  model: z.string().min(1),
   tools: z.array(z.enum(['Read', 'Grep', 'Glob', 'Edit', 'Write'])).min(1),
 });
 
@@ -23,15 +23,13 @@ export function parseAgentDefinition(name: string, content: string): AgentDefini
     if (separatorIndex === -1) continue;
     fields.set(line.slice(0, separatorIndex).trim(), line.slice(separatorIndex + 1).trim());
   }
-  const parsed = agentFrontmatterSchema.parse({
-    description: fields.get('description'),
-    model: fields.get('model'),
-    tools: fields.get('tools')?.split(',').map((tool) => tool.trim()),
-  });
+  const { tools, ...otherFields } = Object.fromEntries(fields);
+  const parsed = agentFrontmatterSchema.parse({ ...otherFields, tools: tools?.split(',').map((tool) => tool.trim()) });
   return { name, ...parsed, systemPrompt: body.trim() };
 }
 
-export async function loadAgentDefinition(repositoryRoot: string, name: string) {
-  const content = await readFile(path.join(repositoryRoot, '.claude', 'agents', `${name}.md`), 'utf8');
+// The definition becomes the system prompt, so it must come from the base checkout, never the PR head.
+export async function loadAgentDefinition(trustedRepositoryRoot: string, name: string) {
+  const content = await readFile(path.join(trustedRepositoryRoot, '.claude', 'agents', `${name}.md`), 'utf8');
   return parseAgentDefinition(name, content);
 }

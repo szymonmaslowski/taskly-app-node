@@ -181,7 +181,7 @@ type RunStageOptions<Schema extends z.ZodType> = {
   settings: StageSettings;
   logger: Logger;
   maxOutputAttempts: number;
-  model?: string;
+  model: string;
   transcriptFile?: string;
 };
 
@@ -215,7 +215,7 @@ async function runAttempt<Schema extends z.ZodType>(options: RunStageOptions<Sch
 }
 
 export async function runStage<Schema extends z.ZodType>(options: RunStageOptions<Schema>) {
-  const model = options.model ?? options.agent.model;
+  const { model } = options;
   options.logger.info(`model ${model}, effort ${options.settings.effort}`);
   const usages: StageUsage[] = [];
   let prompt = options.prompt;
