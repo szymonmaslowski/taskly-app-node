@@ -31,7 +31,8 @@ export function parseAgentDefinition(name: string, content: string): AgentDefini
   return { name, ...parsed, systemPrompt: body.trim() };
 }
 
-export async function loadAgentDefinition(repositoryRoot: string, name: string) {
-  const content = await readFile(path.join(repositoryRoot, '.claude', 'agents', `${name}.md`), 'utf8');
+// The definition becomes the system prompt, so it must come from the base checkout, never the PR head.
+export async function loadAgentDefinition(trustedRepositoryRoot: string, name: string) {
+  const content = await readFile(path.join(trustedRepositoryRoot, '.claude', 'agents', `${name}.md`), 'utf8');
   return parseAgentDefinition(name, content);
 }
