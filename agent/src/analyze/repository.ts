@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { WorkspaceConfig } from '../config.ts';
 import { createMatcher, readJsonFile } from '../sandbox/files.ts';
-import { runTests } from '../sandbox/runner.ts';
+import { coverageFileName, runTests } from '../sandbox/runner.ts';
 import { coverageReportSchema, isFullyCovered, summariseCoverage, type CoverageByFile, type FileCoverage } from './coverage.ts';
 import { findTestedFiles } from './imports.ts';
 
@@ -27,11 +27,7 @@ type MeasureCoverageOptions = {
 
 export async function measureCoverage({ runnerDirectory, outputDirectory, workspace }: MeasureCoverageOptions) {
   const testRun = await runTests({ workspaceDirectory: runnerDirectory, outputDirectory, workspace, coverage: true });
-  const report = await readJsonFile(
-    path.join(outputDirectory, 'coverage', 'coverage-final.json'),
-    coverageReportSchema,
-    maxCoverageReportBytes,
-  );
+  const report = await readJsonFile(path.join(outputDirectory, coverageFileName), coverageReportSchema, maxCoverageReportBytes);
   return { testRun, coverage: summariseCoverage(report, workspace.root) };
 }
 
