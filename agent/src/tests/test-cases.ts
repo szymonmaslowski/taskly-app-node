@@ -112,7 +112,7 @@ export function findBannedPatterns({ fileName, content, testedFiles, knownFiles 
   const sourceFile = parse(fileName, content);
   const patterns: BannedPattern[] = [];
   const lineOf = (node: ts.Node) => sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
-  const visit = (node: ts.Node, caseName: string, insideTry: boolean) => {
+  const visit = (node: ts.Node, caseName: string, guard: 'try' | 'catch' | undefined) => {
     let currentCase = caseName;
     if (ts.isCallExpression(node)) {
       const rootName = calleeRootName(node.expression);
@@ -122,7 +122,7 @@ export function findBannedPatterns({ fileName, content, testedFiles, knownFiles 
           if (bannedModifiers.has(modifier)) patterns.push({ kind: `${rootName}.${modifier}`, caseName: currentCase, line: lineOf(node) });
         }
       }
-      if (isExpectCall(node) && insideTry) patterns.push({ kind: 'expect inside try', caseName, line: lineOf(node) });
+      if (isExpectCall(node) && guard) patterns.push({ kind: `expect inside ${guard}`, caseName, line: lineOf(node) });
       if (ts.isPropertyAccessExpression(node.expression) && node.expression.getText(sourceFile) === 'vi.mock') {
         const [specifier] = node.arguments;
         const mockedFile = specifier && ts.isStringLiteralLike(specifier) ? resolveRelativeImport(fileName, specifier.text, knownFiles) : undefined;
@@ -130,14 +130,14 @@ export function findBannedPatterns({ fileName, content, testedFiles, knownFiles 
       }
     }
     if (ts.isTryStatement(node)) {
-      visit(node.tryBlock, currentCase, true);
-      if (node.catchClause) visit(node.catchClause, currentCase, insideTry);
-      if (node.finallyBlock) visit(node.finallyBlock, currentCase, insideTry);
+      visit(node.tryBlock, currentCase, 'try');
+      if (node.catchClause) visit(node.catchClause, currentCase, 'catch');
+      if (node.finallyBlock) visit(node.finallyBlock, currentCase, guard);
       return;
     }
-    ts.forEachChild(node, (child) => visit(child, currentCase, insideTry));
+    ts.forEachChild(node, (child) => visit(child, currentCase, guard));
   };
-  visit(sourceFile, '', false);
+  visit(sourceFile, '', undefined);
   return patterns;
 }
 

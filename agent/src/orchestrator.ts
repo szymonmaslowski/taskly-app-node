@@ -15,6 +15,7 @@ import { buildImages } from './sandbox/images.ts';
 import { checkRepositoryThresholds, installRunnerWorkspace, prepareRunnerWorkspace, runTests, runTypecheck } from './sandbox/runner.ts';
 import { createStagingCopy, diffStagingCopy, findDisallowedChanges, type StagingChanges, type StagingManifest } from './sandbox/staging.ts';
 import { applyStagingToRepository, syncStagingToRunner } from './sandbox/sync.ts';
+import type { TestCaseResult } from './sandbox/test-results.ts';
 import { loadSkill, type Skill } from './skills.ts';
 import { applyReview, numberCases, partitionPlannedCases, type CaseDecision } from './stages/plan.ts';
 import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt, type FileFailures } from './stages/prompts.ts';
@@ -144,18 +145,38 @@ async function findNewBannedPatterns(context: WorkspaceContext, testFile: string
   );
 }
 
-async function runTouchedTests(context: WorkspaceContext, testFiles: string[], attemptLabel: string) {
+async function findChangedCasesThatDidNotRun(context: WorkspaceContext, testFile: string, cases: TestCaseResult[]) {
+  const workspacePath = testFile.slice(context.workspace.root.length + 1);
+  const notRun = cases.filter((testCase) => testCase.file === workspacePath && testCase.status === 'skipped').map((testCase) => testCase.fullName);
+  if (notRun.length === 0) return [];
+  const current = await readStagedFile(context, testFile);
+  if (current === undefined) return [];
+  const changedNames = new Set(compareTestFile(testFile, await readOriginalFile(context, testFile), current).map((change) => change.name));
+  return findCasesByRuntimeNames(testFile, current, notRun)
+    .filter((testCase) => changedNames.has(testCase.name))
+    .map((testCase) => `"${testCase.name}" did not run`);
+}
+
+type TestRunScope = {
+  testFiles: string[];
+  scannedFiles: string[];
+};
+
+async function runTouchedTests(context: WorkspaceContext, { testFiles, scannedFiles }: TestRunScope, attemptLabel: string) {
   const { logger, workspace, directories } = context;
-  if (testFiles.length === 0) return [];
+  if (testFiles.length === 0 && scannedFiles.length === 0) return [];
   logger.startStep(`run · ${attemptLabel}`);
   const typecheck = await runTypecheck(directories.runner, directories.output, workspace);
   const prefix = `${workspace.root}/`;
-  const testRun = await runTests({
-    workspaceDirectory: directories.runner,
-    outputDirectory: directories.output,
-    workspace,
-    testFiles: testFiles.map((testFile) => testFile.slice(prefix.length)),
-  });
+  const testRun =
+    testFiles.length === 0
+      ? { cases: [], fileErrors: [] }
+      : await runTests({
+          workspaceDirectory: directories.runner,
+          outputDirectory: directories.output,
+          workspace,
+          testFiles: testFiles.map((testFile) => testFile.slice(prefix.length)),
+        });
   const failures = collectFailures({
     workspaceRoot: workspace.root,
     testFiles,
@@ -163,13 +184,14 @@ async function runTouchedTests(context: WorkspaceContext, testFiles: string[], a
     fileErrors: testRun.fileErrors,
     typecheckOutput: typecheck.output,
   });
-  for (const testFile of testFiles) {
-    const bannedPatterns = await findNewBannedPatterns(context, testFile);
-    if (bannedPatterns.length === 0) continue;
+  const addProblems = (testFile: string, problems: string[]) => {
+    if (problems.length === 0) return;
     const existing = failures.find((failure) => failure.testFile === testFile);
-    if (existing) existing.bannedPatterns = bannedPatterns;
-    else failures.push({ testFile, failingCases: [], typecheckErrors: [], bannedPatterns });
-  }
+    if (existing) existing.bannedPatterns.push(...problems);
+    else failures.push({ testFile, failingCases: [], typecheckErrors: [], bannedPatterns: problems });
+  };
+  for (const scannedFile of scannedFiles) addProblems(scannedFile, await findNewBannedPatterns(context, scannedFile));
+  for (const testFile of testFiles) addProblems(testFile, await findChangedCasesThatDidNotRun(context, testFile, testRun.cases));
   for (const failure of failures) {
     for (const failingCase of failure.failingCases) logger.untrusted(`✗ ${failure.testFile}: ${failingCase.fullName}`);
     if (failure.loadError) logger.untrusted(`✗ ${failure.testFile} failed to load`);
@@ -180,6 +202,40 @@ async function runTouchedTests(context: WorkspaceContext, testFiles: string[], a
   const failed = testRun.cases.filter((testCase) => testCase.status === 'failed').length;
   logger.endStep(`typecheck ${typecheck.passed ? 'passed' : 'failed'}, ${passed} passed, ${failed} failed`);
   return failures;
+}
+
+type BatchSnapshot = Map<string, string | undefined>;
+
+async function readChangedFiles(context: WorkspaceContext) {
+  const changes = await diffStagingCopy(context.directories.staging, context.manifest);
+  const snapshot: BatchSnapshot = new Map();
+  for (const changedPath of [...changes.added, ...changes.modified]) snapshot.set(changedPath, await readStagedFile(context, changedPath));
+  return snapshot;
+}
+
+async function findBatchChanges(context: WorkspaceContext, batchStart: BatchSnapshot) {
+  const current = await readChangedFiles(context);
+  const changedPaths = [...current.keys()].filter((changedPath) => current.get(changedPath) !== batchStart.get(changedPath));
+  const restoredPaths = [...batchStart.keys()].filter((changedPath) => !current.has(changedPath));
+  return [...changedPaths, ...restoredPaths];
+}
+
+async function listCurrentTestFiles(context: WorkspaceContext) {
+  const isTestFile = createMatcher(context.workspace.root, context.workspace.tests);
+  const changes = await diffStagingCopy(context.directories.staging, context.manifest);
+  return [...context.manifest.keys(), ...changes.added].filter((filePath) => isTestFile(filePath)).sort();
+}
+
+// Every file the batch changed is run and scanned. A change to a fixture, setup file or helper can break any test, so it runs the whole suite.
+async function selectBatchTestRun(context: WorkspaceContext, batchStart: BatchSnapshot, extraTestFiles: string[] = []): Promise<TestRunScope> {
+  const isTestFile = createMatcher(context.workspace.root, context.workspace.tests);
+  const currentTestFiles = await listCurrentTestFiles(context);
+  const batchPaths = await findBatchChanges(context, batchStart);
+  const existingPaths = [];
+  for (const batchPath of batchPaths) if ((await readStagedFile(context, batchPath)) !== undefined) existingPaths.push(batchPath);
+  const changesSharedCode = existingPaths.some((batchPath) => !isTestFile(batchPath));
+  const selected = changesSharedCode ? currentTestFiles : [...existingPaths, ...extraTestFiles].filter((filePath) => currentTestFiles.includes(filePath));
+  return { testFiles: [...new Set(selected)], scannedFiles: existingPaths };
 }
 
 async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
@@ -230,7 +286,7 @@ async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
   return { decisions, rejectedCases, skipped };
 }
 
-async function fixFailures(context: WorkspaceContext, cases: PlannedCase[], initialFailures: FileFailures[]) {
+async function fixFailures(context: WorkspaceContext, batchStart: BatchSnapshot, cases: PlannedCase[], initialFailures: FileFailures[]) {
   const { logger, agents, skill, readingSkill } = context;
   let failures = initialFailures;
   let attempt = 0;
@@ -262,7 +318,7 @@ async function fixFailures(context: WorkspaceContext, cases: PlannedCase[], init
       buffered.flush(logger);
     });
     await checkStagingChanges(context);
-    failures = await runTouchedTests(context, failures.map((failure) => failure.testFile), `after fix attempt ${attempt}`);
+    failures = await runTouchedTests(context, await selectBatchTestRun(context, batchStart), `after fix attempt ${attempt}`);
   }
   return { failures, attempts: attempt, notes };
 }
@@ -274,7 +330,7 @@ async function restoreFile(context: WorkspaceContext, testFile: string) {
   else await writeFile(stagedPath, original);
 }
 
-async function cleanUpRemainingFailures(context: WorkspaceContext, failures: FileFailures[]) {
+async function cleanUpRemainingFailures(context: WorkspaceContext, batchStart: BatchSnapshot, failures: FileFailures[]) {
   const { logger } = context;
   const removedCases: BatchResult['removedCases'] = [];
   const revertedCases: BatchResult['revertedCases'] = [];
@@ -304,7 +360,7 @@ async function cleanUpRemainingFailures(context: WorkspaceContext, failures: Fil
     for (const name of [...added, ...modified]) logger.untrusted(`${added.includes(name) ? 'removed' : 'reverted'} ${failure.testFile}: ${name}`);
   }
   await checkStagingChanges(context);
-  const remaining = await runTouchedTests(context, failures.map((failure) => failure.testFile).filter((testFile) => !cleanup.revertedFiles.includes(testFile)), 'after clean-up');
+  const remaining = await runTouchedTests(context, await selectBatchTestRun(context, batchStart), 'after clean-up');
   for (const failure of remaining) {
     const developerCasesOnly = failure.failingCases.length > 0 && !failure.loadError && failure.typecheckErrors.length === 0 && failure.bannedPatterns.length === 0;
     if (developerCasesOnly) continue;
@@ -335,6 +391,7 @@ async function processBatch(context: WorkspaceContext, batch: WorkBatch): Promis
     if (!testedFiles.includes(keptCase.sourceFile)) context.testedFilesByTest.set(keptCase.testFile, [...testedFiles, keptCase.sourceFile]);
   }
 
+  const batchStart = await readChangedFiles(context);
   context.logger.startStep(`write · ${batch.module}`);
   const written = await runContextStage(context, {
     agent: context.agents.writer,
@@ -342,14 +399,12 @@ async function processBatch(context: WorkspaceContext, batch: WorkBatch): Promis
     settings: stageSettings.write,
     outputSchema: writeOutputSchema,
   });
-  const changes = await checkStagingChanges(context);
+  await checkStagingChanges(context);
   context.logger.endStep(`${written.written.length} test files written`);
 
-  const changedPaths = new Set([...changes.added, ...changes.modified]);
-  const touchedTestFiles = [...new Set(keptCases.map((keptCase) => keptCase.testFile))].filter((testFile) => changedPaths.has(testFile));
-  const failures = await runTouchedTests(context, touchedTestFiles, 'after write');
-  const fixed = await fixFailures(context, keptCases, failures);
-  const cleanup = await cleanUpRemainingFailures(context, fixed.failures);
+  const failures = await runTouchedTests(context, await selectBatchTestRun(context, batchStart), 'after write');
+  const fixed = await fixFailures(context, batchStart, keptCases, failures);
+  const cleanup = await cleanUpRemainingFailures(context, batchStart, fixed.failures);
   return { ...result, fixAttempts: fixed.attempts, fixerNotes: fixed.notes, ...cleanup };
 }
 

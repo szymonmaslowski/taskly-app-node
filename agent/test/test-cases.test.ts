@@ -66,7 +66,7 @@ describe('removeCases and revertCases', () => {
 describe('findBannedPatterns', () => {
   const knownFiles = new Set(['backend/src/mappers.ts', 'backend/tests/mappers.test.ts']);
 
-  it('finds skipped, focused and inverted cases, expects inside try and mocks of the module under test', () => {
+  it('finds skipped, focused and inverted cases, expects inside try or catch and mocks of the module under test', () => {
     const content = `
 vi.mock('../src/mappers.ts', () => ({ fromModel: vi.fn() }));
 it.skip('skipped', () => {});
@@ -74,6 +74,9 @@ it.only('focused', () => {});
 it.fails('inverted', () => { expect(1).toBe(2); });
 it('swallows', () => {
   try { expect(fromModel({})).toThrow(); } catch {}
+});
+it('passes when nothing throws', async () => {
+  try { await fromModel({}); } catch (error) { expect(error).toBeInstanceOf(Error); }
 });
 `;
     const patterns = findBannedPatterns({ fileName: 'backend/tests/mappers.test.ts', content, testedFiles: ['backend/src/mappers.ts'], knownFiles });
@@ -83,6 +86,7 @@ it('swallows', () => {
       'it.only|focused',
       'it.fails|inverted',
       'expect inside try|swallows',
+      'expect inside catch|passes when nothing throws',
     ]);
   });
 
