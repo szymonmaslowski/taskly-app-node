@@ -4,7 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { AgentDefinition } from './agents.ts';
 import type { Logger } from './logger.ts';
-import { runProcess } from './process.ts';
+import { createContainerName, runContainer } from './sandbox/containers.ts';
 import { agentImage } from './sandbox/images.ts';
 
 const containerWorkingDirectory = '/workspace';
@@ -147,8 +147,6 @@ export function buildClaudeArguments({ agent, prompt, model, settings, jsonSchem
 export function buildDockerArguments(workingDirectory: string, writable: boolean, credentialArguments: string[]) {
   const { uid, gid } = userInfo();
   return [
-    'run',
-    '--rm',
     '--user',
     `${uid}:${gid}`,
     ...credentialArguments,
@@ -192,9 +190,9 @@ async function runAttempt<Schema extends z.ZodType>(options: RunStageOptions<Sch
   const claudeArguments = buildClaudeArguments({ agent, prompt, model, settings, jsonSchema });
   let resultEvent: ResultEvent | undefined;
   const pendingTranscriptWrites: Promise<void>[] = [];
-  const processResult = await runProcess('docker', [...dockerArguments, ...claudeArguments], {
+  const processResult = await runContainer(createContainerName('agent'), [...dockerArguments, ...claudeArguments], {
     timeoutMilliseconds: settings.timeoutMinutes * 60_000,
-    maxOutputBytes: 50_000_000,
+    maxOutputCharacters: 50_000_000,
     onStdoutLine(line) {
       if (transcriptFile) pendingTranscriptWrites.push(appendFile(transcriptFile, `${line}\n`));
       resultEvent = readStreamLine(line, logger) ?? resultEvent;
