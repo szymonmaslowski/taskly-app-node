@@ -43,6 +43,7 @@ type WorkspaceContext = {
   agents: StageAgents;
   directories: RunDirectories;
   manifest: StagingManifest;
+  syncedPaths: Set<string>;
   logger: Logger;
   transcriptDirectory: string;
   usages: StageUsage[];
@@ -113,7 +114,8 @@ async function checkStagingChanges(context: WorkspaceContext) {
   if (changes.symbolicLinks.length > 0) throw new Error(`The agent created symbolic links: ${changes.symbolicLinks.join(', ')}`);
   const disallowed = findDisallowedChanges(changes, context.workspace);
   if (disallowed.length > 0) throw new Error(`The agent changed files outside the writable paths: ${disallowed.join(', ')}`);
-  await syncStagingToRunner(context.directories.staging, context.directories.runner, context.workspace.root, changes);
+  for (const changedPath of [...changes.added, ...changes.modified]) context.syncedPaths.add(changedPath);
+  await syncStagingToRunner(context.directories.staging, context.directories.runner, context.workspace.root, [...context.syncedPaths]);
   return changes;
 }
 
@@ -409,6 +411,7 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
         agents,
         directories,
         manifest,
+        syncedPaths: new Set(),
         logger,
         transcriptDirectory,
         usages: [],
