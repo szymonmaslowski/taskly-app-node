@@ -53,6 +53,32 @@ describe('configSchema', () => {
     expect(() => configSchema.parse({ workspaces: { backend: workspace({ skill: '../../etc' }) } })).toThrow(/lowercase name/);
   });
 
+  it('fills in every stage and loop setting, so the key is optional', () => {
+    const config = configSchema.parse({ workspaces: { backend: workspace() } });
+    expect(config.stages.planReview).toEqual({
+      agent: 'plan-reviewer',
+      model: 'claude-opus-5-5',
+      effort: 'high',
+      maxTurns: 20,
+      timeoutMinutes: 10,
+      maxBudgetUsd: 3,
+    });
+    expect(config.loop).toEqual({ planRounds: 2, outputAttempts: 2, fixAttempts: 4, agentParallelism: 1 });
+  });
+
+  it('lets a repository change one stage setting and keeps the rest', () => {
+    const config = configSchema.parse({ workspaces: { backend: workspace() }, stages: { write: { model: 'claude-opus-5-5' } } });
+    expect(config.stages.write).toMatchObject({ agent: 'test-writer', model: 'claude-opus-5-5', effort: 'medium' });
+  });
+
+  it.each([
+    { stages: { fix: { maxBudgetUsd: 50 } } },
+    { stages: { plan: { maxTurns: 500 } } },
+    { loop: { fixAttempts: 10 } },
+  ])('refuses limits above the hard caps: %j', (overrides) => {
+    expect(() => configSchema.parse({ workspaces: { backend: workspace() }, ...overrides })).toThrow();
+  });
+
   it('rejects unknown keys, so a typo does not silently fall back to a default', () => {
     expect(() => configSchema.parse({ workspaces: { backend: workspace() }, flakyRerun: 3 })).toThrow(/flakyRerun/);
   });

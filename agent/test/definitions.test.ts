@@ -17,6 +17,15 @@ describe('repository agent definitions', () => {
   });
 });
 
+describe('repository stage configuration', () => {
+  it('points every stage at an agent file that exists', async () => {
+    const config = await loadConfig(repositoryRoot);
+    for (const stage of Object.values(config.stages)) {
+      expect((await loadAgentDefinition(repositoryRoot, stage.agent)).systemPrompt).not.toBe('');
+    }
+  });
+});
+
 describe('repository skills', () => {
   it('has a skill for every configured workspace', async () => {
     const config = await loadConfig(repositoryRoot);

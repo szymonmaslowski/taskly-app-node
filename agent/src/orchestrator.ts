@@ -5,10 +5,10 @@ import { loadAgentDefinition, type AgentDefinition } from './agents.ts';
 import type { CoverageByFile } from './analyze/coverage.ts';
 import { measureCoverage, planRepositoryWork, type WorkBatch } from './analyze/repository.ts';
 import { mapWithConcurrency } from './concurrency.ts';
-import { loadConfig, type WorkspaceConfig } from './config.ts';
+import { loadConfig, type LoopConfig, type StageConfig, type WorkspaceConfig } from './config.ts';
 import { collectFailures } from './failures.ts';
 import { createBufferedLogger, type Logger } from './logger.ts';
-import { runStage, type StageSettings, type StageUsage } from './run-stage.ts';
+import { isWritingAgent, runStage, type StageUsage } from './run-stage.ts';
 import { createRunDirectories, removeRunDirectories, type RunDirectories } from './sandbox/directories.ts';
 import { assertPrintablePaths, createMatcher, listTrackedFiles, readRegularFile } from './sandbox/files.ts';
 import { buildImages } from './sandbox/images.ts';
@@ -20,18 +20,13 @@ import { loadSkill, type Skill } from './skills.ts';
 import { applyReview, numberCases, partitionPlannedCases, type CaseDecision } from './stages/plan.ts';
 import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt, type FileFailures } from './stages/prompts.ts';
 import { fixOutputSchema, planOutputSchema, reviewOutputSchema, writeOutputSchema, type PlannedCase } from './stages/schemas.ts';
-import { loopLimits, stageSettings } from './stages.ts';
+import type { StageName } from './stages.ts';
 import { changesOutsideCases, compareTestFile, findCasesByRuntimeNames, matchFailingCases, removeCases, revertCases, type CaseChange } from './tests/test-changes.ts';
 import { findBannedPatterns, newBannedPatterns } from './tests/test-cases.ts';
 
 const maxRepositoryFileBytes = 2_000_000;
 
-type StageAgents = {
-  planner: AgentDefinition;
-  reviewer: AgentDefinition;
-  writer: AgentDefinition;
-  fixer: AgentDefinition;
-};
+type StageAgents = Record<StageName, AgentDefinition>;
 
 type WorkspaceContext = {
   name: string;
@@ -42,6 +37,8 @@ type WorkspaceContext = {
   skill: Skill;
   readingSkill: Skill;
   agents: StageAgents;
+  stages: Record<StageName, StageConfig>;
+  loop: LoopConfig;
   directories: RunDirectories;
   manifest: StagingManifest;
   syncedPaths: Set<string>;
@@ -99,21 +96,25 @@ export type WorkspaceResult = {
 let transcriptCounter = 0;
 
 type ContextStageOptions<Schema extends z.ZodType> = {
-  agent: AgentDefinition;
+  stage: StageName;
   prompt: string;
-  settings: StageSettings;
-  model?: string;
   outputSchema: Schema;
 };
 
 async function runContextStage<Schema extends z.ZodType>(context: WorkspaceContext, options: ContextStageOptions<Schema>) {
   transcriptCounter += 1;
+  const agent = context.agents[options.stage];
+  const { model, effort, maxTurns, timeoutMinutes, maxBudgetUsd } = context.stages[options.stage];
   const { output, usages } = await runStage({
-    ...options,
+    agent,
+    prompt: options.prompt,
+    outputSchema: options.outputSchema,
+    settings: { effort, maxTurns, timeoutMinutes, maxBudgetUsd },
+    model,
     workingDirectory: context.directories.staging,
     logger: context.logger,
-    maxOutputAttempts: loopLimits.outputAttempts,
-    transcriptFile: path.join(context.transcriptDirectory, `${String(transcriptCounter).padStart(3, '0')}-${options.agent.name}.jsonl`),
+    maxOutputAttempts: context.loop.outputAttempts,
+    transcriptFile: path.join(context.transcriptDirectory, `${String(transcriptCounter).padStart(3, '0')}-${agent.name}.jsonl`),
   });
   context.usages.push(...usages);
   return output;
@@ -258,13 +259,12 @@ async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
   let missingBehaviours: { sourceFile: string; behaviour: string; reason: string }[] = [];
   let firstCaseNumber = 1;
 
-  for (let round = 1; round <= loopLimits.planRounds; round += 1) {
+  for (let round = 1; round <= context.loop.planRounds; round += 1) {
     const approvedCases = decisions.filter((decision) => decision.verdict === 'keep');
     logger.startStep(`plan · ${batch.module} · round ${round}`);
     const plan = await runContextStage(context, {
-      agent: agents.planner,
+      stage: 'plan',
       prompt: buildPlanPrompt({ skill, workItems: batch.items, missingBehaviours, approvedCases }),
-      settings: stageSettings.plan,
       outputSchema: planOutputSchema,
     });
     const numberedCases = numberCases(plan, firstCaseNumber);
@@ -278,9 +278,8 @@ async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
 
     logger.startStep(`plan-review · ${batch.module} · round ${round}`);
     const review = await runContextStage(context, {
-      agent: agents.reviewer,
+      stage: 'planReview',
       prompt: buildReviewPrompt({ skill, workItems: batch.items, cases: accepted, approvedCases }),
-      settings: stageSettings.planReview,
       outputSchema: reviewOutputSchema,
     });
     const roundDecisions = applyReview(accepted, review);
@@ -301,26 +300,24 @@ async function fixFailures(context: WorkspaceContext, batchStart: BatchSnapshot,
   let failures = initialFailures;
   let attempt = 0;
   const notes: string[] = [];
-  while (failures.length > 0 && attempt < loopLimits.fixAttempts) {
+  while (failures.length > 0 && attempt < context.loop.fixAttempts) {
     attempt += 1;
-    const isLastAttempt = attempt === loopLimits.fixAttempts;
-    await mapWithConcurrency(failures, loopLimits.agentParallelism, async (fileFailures) => {
+    const isLastAttempt = attempt === context.loop.fixAttempts;
+    await mapWithConcurrency(failures, context.loop.agentParallelism, async (fileFailures) => {
       const buffered = createBufferedLogger();
       const fixerContext = { ...context, logger: buffered.logger };
-      buffered.logger.startStep(`fix · attempt ${attempt}/${loopLimits.fixAttempts}`);
+      buffered.logger.startStep(`fix · attempt ${attempt}/${context.loop.fixAttempts}`);
       buffered.logger.untrusted(fileFailures.testFile);
       const fixResult = await runContextStage(fixerContext, {
-        agent: agents.fixer,
+        stage: isLastAttempt ? 'lastFix' : 'fix',
         prompt: buildFixPrompt({
           skill,
           readingSkill,
           failures: fileFailures,
           cases: cases.filter((plannedCase) => plannedCase.testFile === fileFailures.testFile),
           attempt,
-          maxAttempts: loopLimits.fixAttempts,
+          maxAttempts: context.loop.fixAttempts,
         }),
-        settings: isLastAttempt ? stageSettings.lastFix : stageSettings.fix,
-        model: isLastAttempt ? loopLimits.lastFixModel : undefined,
         outputSchema: fixOutputSchema,
       });
       if (fixResult.notes.trim()) notes.push(`${fileFailures.testFile}: ${fixResult.notes.trim()}`);
@@ -446,9 +443,8 @@ async function processBatch(context: WorkspaceContext, batch: WorkBatch, batchSt
 
   context.logger.startStep(`write · ${batch.module}`);
   const written = await runContextStage(context, {
-    agent: context.agents.writer,
+    stage: 'write',
     prompt: buildWritePrompt({ skill: context.skill, cases: keptCases }),
-    settings: stageSettings.write,
     outputSchema: writeOutputSchema,
   });
   await checkStagingChanges(context);
@@ -497,6 +493,28 @@ async function processBatchOrRollBack(context: WorkspaceContext, batch: WorkBatc
   }
 }
 
+const writingStages = new Set<StageName>(['write', 'fix', 'lastFix']);
+
+// Only writing stages get a writable staging copy, and only their changes are checked, so each stage must get the agent kind it expects.
+async function loadStageAgent(trustedRepositoryRoot: string, stages: Record<StageName, StageConfig>, stage: StageName) {
+  const agent = await loadAgentDefinition(trustedRepositoryRoot, stages[stage].agent);
+  const mustWrite = writingStages.has(stage);
+  if (isWritingAgent(agent) !== mustWrite) {
+    throw new Error(`Stage ${stage} needs an agent that ${mustWrite ? 'can' : 'cannot'} write files, and ${agent.name} ${mustWrite ? 'cannot' : 'can'}`);
+  }
+  return agent;
+}
+
+async function loadStageAgents(trustedRepositoryRoot: string, stages: Record<StageName, StageConfig>): Promise<StageAgents> {
+  return {
+    plan: await loadStageAgent(trustedRepositoryRoot, stages, 'plan'),
+    planReview: await loadStageAgent(trustedRepositoryRoot, stages, 'planReview'),
+    write: await loadStageAgent(trustedRepositoryRoot, stages, 'write'),
+    fix: await loadStageAgent(trustedRepositoryRoot, stages, 'fix'),
+    lastFix: await loadStageAgent(trustedRepositoryRoot, stages, 'lastFix'),
+  };
+}
+
 type RunRepositoryModeOptions = {
   repositoryRoot: string;
   logger: Logger;
@@ -510,12 +528,7 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
   logger.startStep('prepare');
   await buildImages(repositoryRoot);
   const trackedFiles = await listTrackedFiles(repositoryRoot);
-  const agents: StageAgents = {
-    planner: await loadAgentDefinition(repositoryRoot, 'test-planner'),
-    reviewer: await loadAgentDefinition(repositoryRoot, 'plan-reviewer'),
-    writer: await loadAgentDefinition(repositoryRoot, 'test-writer'),
-    fixer: await loadAgentDefinition(repositoryRoot, 'test-fixer'),
-  };
+  const agents = await loadStageAgents(repositoryRoot, config.stages);
   const readingSkill = await loadSkill(repositoryRoot, 'reading-test-results');
   const runId = new Date().toISOString().replace(/[:.]/g, '-');
   const transcriptDirectory = path.join(repositoryRoot, '.testeragent', 'runs', runId);
@@ -553,6 +566,8 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
         skill: await loadSkill(repositoryRoot, workspace.skill),
         readingSkill,
         agents,
+        stages: config.stages,
+        loop: config.loop,
         directories,
         manifest,
         syncedPaths: new Set(),

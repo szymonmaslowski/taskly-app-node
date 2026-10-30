@@ -46,4 +46,11 @@ export default defineConfig({
       },
     },
   },
+  stages: {
+    plan: { agent: 'test-planner', model: 'claude-sonnet-5-5' },
+    planReview: { agent: 'plan-reviewer', model: 'claude-opus-5-5' },
+    write: { agent: 'test-writer', model: 'claude-sonnet-5-5' },
+    fix: { agent: 'test-fixer', model: 'claude-sonnet-5-5' },
+    lastFix: { agent: 'test-fixer', model: 'claude-opus-5-5' },
+  },
 });

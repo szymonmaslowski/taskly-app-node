@@ -5,13 +5,14 @@ import path from 'node:path';
 import { z } from 'zod';
 import type { AgentDefinition } from './agents.ts';
 import type { Logger } from './logger.ts';
+import type { stageEfforts } from './stages.ts';
 import { createContainerName, runContainer } from './sandbox/containers.ts';
 import { agentImage } from './sandbox/images.ts';
 
 const containerWorkingDirectory = '/workspace';
 
 export type StageSettings = {
-  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  effort: (typeof stageEfforts)[number];
   maxTurns: number;
   timeoutMinutes: number;
   maxBudgetUsd: number;
