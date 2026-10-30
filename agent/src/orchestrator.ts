@@ -112,6 +112,7 @@ async function runContextStage<Schema extends z.ZodType>(context: WorkspaceConte
     ...options,
     workingDirectory: context.directories.staging,
     logger: context.logger,
+    maxOutputAttempts: loopLimits.outputAttempts,
     transcriptFile: path.join(context.transcriptDirectory, `${String(transcriptCounter).padStart(3, '0')}-${options.agent.name}.jsonl`),
   });
   context.usages.push(...usages);

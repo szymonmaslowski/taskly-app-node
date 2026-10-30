@@ -10,6 +10,8 @@ export const stageSettings = {
 
 export const loopLimits = {
   planRounds: 2,
+  // One retry with the rejection reason fixes a malformed answer; a second failure means the task was misread.
+  outputAttempts: 2,
   fixAttempts: 4,
   lastFixModel: 'claude-opus-5-5',
   // Fixers share one writable staging copy, so two of them could edit the same fixture at once.
