@@ -24,9 +24,13 @@ describe('loadConfig', () => {
   });
 });
 
+const stage = { model: 'claude-sonnet-5-5', effort: 'medium' as const, maxTurns: 10, timeoutMinutes: 5, maxBudgetUsd: 1 };
+const stages = { plan: stage, planReview: stage, write: stage, fix: stage, lastFix: stage };
+const loop = { planRounds: 2, outputAttempts: 2, fixAttempts: 3, agentParallelism: 1 };
+
 describe('configSchema', () => {
   it('fills in defaults for optional settings', () => {
-    const config = configSchema.parse({ workspaces: { backend: workspace() } });
+    const config = configSchema.parse({ workspaces: { backend: workspace() }, stages, loop });
     expect(config.flakyReruns).toBe(2);
     expect(config.limits).toEqual({ maxChangedSourceFiles: 15, maxChangedLines: 1500 });
     expect(config.workspaces.backend).toMatchObject({ ignoredSources: [], shared: [], context: [] });
@@ -38,50 +42,39 @@ describe('configSchema', () => {
     { writable: ['tests/../../secrets/**'] },
     { sources: ['/absolute/**/*.ts'] },
   ])('rejects paths that leave the repository: %j', (overrides) => {
-    expect(() => configSchema.parse({ workspaces: { backend: workspace(overrides) } })).toThrow(/inside the repository/);
+    expect(() => configSchema.parse({ workspaces: { backend: workspace(overrides) }, stages, loop })).toThrow(/inside the repository/);
   });
 
   it('requires at least one workspace', () => {
-    expect(() => configSchema.parse({ workspaces: {} })).toThrow(/at least one workspace/);
+    expect(() => configSchema.parse({ workspaces: {}, stages, loop })).toThrow(/at least one workspace/);
   });
 
   it('rejects workspace names that are not lowercase identifiers', () => {
-    expect(() => configSchema.parse({ workspaces: { 'Back End': workspace() } })).toThrow(/lowercase name/);
+    expect(() => configSchema.parse({ workspaces: { 'Back End': workspace() }, stages, loop })).toThrow(/lowercase name/);
   });
 
   it('rejects skill names that could point outside the skills directory', () => {
-    expect(() => configSchema.parse({ workspaces: { backend: workspace({ skill: '../../etc' }) } })).toThrow(/lowercase name/);
+    expect(() => configSchema.parse({ workspaces: { backend: workspace({ skill: '../../etc' }) }, stages, loop })).toThrow(/lowercase name/);
   });
 
-  it('fills in every stage and loop setting, so the key is optional', () => {
-    const config = configSchema.parse({ workspaces: { backend: workspace() } });
-    expect(config.stages.planReview).toEqual({
-      agent: 'plan-reviewer',
-      model: 'claude-opus-5-5',
-      effort: 'high',
-      maxTurns: 20,
-      timeoutMinutes: 10,
-      maxBudgetUsd: 3,
-      skills: ['unit-test-principles', 'unit-test-reviewing'],
-      workspaceReference: 'planning.md',
-    });
-    expect(config.loop).toEqual({ planRounds: 2, outputAttempts: 2, fixAttempts: 4, agentParallelism: 1 });
+  it('requires every stage and loop setting, so nothing runs on a value nobody chose', () => {
+    expect(() => configSchema.parse({ workspaces: { backend: workspace() }, loop })).toThrow(/stages/);
+    expect(() => configSchema.parse({ workspaces: { backend: workspace() }, stages: { ...stages, write: { model: 'claude-opus-5-5' } }, loop })).toThrow(/effort/);
   });
 
-  it('lets a repository change one stage setting and keeps the rest', () => {
-    const config = configSchema.parse({ workspaces: { backend: workspace() }, stages: { write: { model: 'claude-opus-5-5' } } });
-    expect(config.stages.write).toMatchObject({ agent: 'test-writer', model: 'claude-opus-5-5', effort: 'medium' });
+  it('rejects settings that belong to the pipeline, such as which agent a stage uses', () => {
+    expect(() => configSchema.parse({ workspaces: { backend: workspace() }, stages: { ...stages, plan: { ...stage, agent: 'test-writer' } }, loop })).toThrow(/agent/);
   });
 
   it.each([
-    { stages: { fix: { maxBudgetUsd: 50 } } },
-    { stages: { plan: { maxTurns: 500 } } },
-    { loop: { fixAttempts: 10 } },
-  ])('refuses limits above the hard caps: %j', (overrides) => {
-    expect(() => configSchema.parse({ workspaces: { backend: workspace() }, ...overrides })).toThrow();
+    { stages: { ...stages, fix: { ...stage, maxBudgetUsd: 50 } }, loop },
+    { stages: { ...stages, plan: { ...stage, maxTurns: 500 } }, loop },
+    { stages, loop: { ...loop, fixAttempts: 10 } },
+  ])('refuses limits above the hard caps: %j', (settings) => {
+    expect(() => configSchema.parse({ workspaces: { backend: workspace() }, ...settings })).toThrow();
   });
 
   it('rejects unknown keys, so a typo does not silently fall back to a default', () => {
-    expect(() => configSchema.parse({ workspaces: { backend: workspace() }, flakyRerun: 3 })).toThrow(/flakyRerun/);
+    expect(() => configSchema.parse({ workspaces: { backend: workspace() }, stages, loop, flakyRerun: 3 })).toThrow(/flakyRerun/);
   });
 });

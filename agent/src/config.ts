@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
-import { defaultLoop, defaultStages, loopCaps, stageCaps, stageEfforts, type StageName } from './stages.ts';
+import { loopCaps, stageCaps, stageEfforts, type StageName } from './stages.ts';
 
 export const configFileName = 'testeragent.config.mts';
 
@@ -31,30 +31,20 @@ const workspaceSchema = z.strictObject({
   }),
 });
 
-function stageSchema(stage: StageName) {
-  const defaults = defaultStages[stage];
-  return z
-    .strictObject({
-      agent: lowercaseName.default(defaults.agent),
-      skills: z.array(lowercaseName).default(defaults.skills),
-      workspaceReference: z.string().regex(/^[a-z][a-z0-9-]*\.md$/, 'must be a markdown file name').default(defaults.workspaceReference),
-      model: z.string().min(1).default(defaults.model),
-      effort: z.enum(stageEfforts).default(defaults.effort),
-      maxTurns: z.number().int().positive().max(stageCaps.maxTurns).default(defaults.maxTurns),
-      timeoutMinutes: z.number().positive().max(stageCaps.timeoutMinutes).default(defaults.timeoutMinutes),
-      maxBudgetUsd: z.number().positive().max(stageCaps.maxBudgetUsd).default(defaults.maxBudgetUsd),
-    })
-    .prefault({});
-}
+const stageSchema = z.strictObject({
+  model: z.string().min(1),
+  effort: z.enum(stageEfforts),
+  maxTurns: z.number().int().positive().max(stageCaps.maxTurns),
+  timeoutMinutes: z.number().positive().max(stageCaps.timeoutMinutes),
+  maxBudgetUsd: z.number().positive().max(stageCaps.maxBudgetUsd),
+});
 
-const loopSchema = z
-  .strictObject({
-    planRounds: z.number().int().min(1).max(loopCaps.planRounds).default(defaultLoop.planRounds),
-    outputAttempts: z.number().int().min(1).max(loopCaps.outputAttempts).default(defaultLoop.outputAttempts),
-    fixAttempts: z.number().int().min(0).max(loopCaps.fixAttempts).default(defaultLoop.fixAttempts),
-    agentParallelism: z.number().int().min(1).max(loopCaps.agentParallelism).default(defaultLoop.agentParallelism),
-  })
-  .prefault({});
+const loopSchema = z.strictObject({
+  planRounds: z.number().int().min(1).max(loopCaps.planRounds),
+  outputAttempts: z.number().int().min(1).max(loopCaps.outputAttempts),
+  fixAttempts: z.number().int().min(0).max(loopCaps.fixAttempts),
+  agentParallelism: z.number().int().min(1).max(loopCaps.agentParallelism),
+});
 
 export const configSchema = z.strictObject({
   workspaces: z
@@ -67,15 +57,13 @@ export const configSchema = z.strictObject({
       maxChangedLines: z.number().int().positive().default(1500),
     })
     .prefault({}),
-  stages: z
-    .strictObject({
-      plan: stageSchema('plan'),
-      planReview: stageSchema('planReview'),
-      write: stageSchema('write'),
-      fix: stageSchema('fix'),
-      lastFix: stageSchema('lastFix'),
-    })
-    .prefault({}),
+  stages: z.strictObject({
+    plan: stageSchema,
+    planReview: stageSchema,
+    write: stageSchema,
+    fix: stageSchema,
+    lastFix: stageSchema,
+  }),
   loop: loopSchema,
 });
 

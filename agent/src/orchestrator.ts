@@ -20,7 +20,7 @@ import { loadSkill, loadSkillReference, type Skill } from './skills.ts';
 import { applyReview, numberCases, partitionPlannedCases, type CaseDecision } from './stages/plan.ts';
 import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt, type FileFailures } from './stages/prompts.ts';
 import { fixOutputSchema, planOutputSchema, reviewOutputSchema, writeOutputSchema, type PlannedCase } from './stages/schemas.ts';
-import type { StageName } from './stages.ts';
+import { stageWiring, type StageName } from './stages.ts';
 import { changesOutsideCases, compareTestFile, findCasesByRuntimeNames, matchFailingCases, removeCases, revertCases, type CaseChange } from './tests/test-changes.ts';
 import { findBannedPatterns, newBannedPatterns } from './tests/test-cases.ts';
 
@@ -494,8 +494,8 @@ async function processBatchOrRollBack(context: WorkspaceContext, batch: WorkBatc
 const writingStages = new Set<StageName>(['write', 'fix', 'lastFix']);
 
 // Only writing stages get a writable staging copy, and only their changes are checked, so each stage must get the agent kind it expects.
-async function loadStageAgent(trustedRepositoryRoot: string, stages: Record<StageName, StageConfig>, stage: StageName) {
-  const agent = await loadAgentDefinition(trustedRepositoryRoot, stages[stage].agent);
+async function loadStageAgent(trustedRepositoryRoot: string, stage: StageName) {
+  const agent = await loadAgentDefinition(trustedRepositoryRoot, stageWiring[stage].agent);
   const mustWrite = writingStages.has(stage);
   if (isWritingAgent(agent) !== mustWrite) {
     throw new Error(`Stage ${stage} needs an agent that ${mustWrite ? 'can' : 'cannot'} write files, and ${agent.name} ${mustWrite ? 'cannot' : 'can'}`);
@@ -503,31 +503,32 @@ async function loadStageAgent(trustedRepositoryRoot: string, stages: Record<Stag
   return agent;
 }
 
-async function loadStageAgents(trustedRepositoryRoot: string, stages: Record<StageName, StageConfig>): Promise<StageAgents> {
+async function loadStageAgents(trustedRepositoryRoot: string): Promise<StageAgents> {
   return {
-    plan: await loadStageAgent(trustedRepositoryRoot, stages, 'plan'),
-    planReview: await loadStageAgent(trustedRepositoryRoot, stages, 'planReview'),
-    write: await loadStageAgent(trustedRepositoryRoot, stages, 'write'),
-    fix: await loadStageAgent(trustedRepositoryRoot, stages, 'fix'),
-    lastFix: await loadStageAgent(trustedRepositoryRoot, stages, 'lastFix'),
+    plan: await loadStageAgent(trustedRepositoryRoot, 'plan'),
+    planReview: await loadStageAgent(trustedRepositoryRoot, 'planReview'),
+    write: await loadStageAgent(trustedRepositoryRoot, 'write'),
+    fix: await loadStageAgent(trustedRepositoryRoot, 'fix'),
+    lastFix: await loadStageAgent(trustedRepositoryRoot, 'lastFix'),
   };
 }
 
-async function loadSkillsForStage(trustedRepositoryRoot: string, stage: StageConfig, workspaceSkill: string) {
+async function loadSkillsForStage(trustedRepositoryRoot: string, stage: StageName, workspaceSkill: string) {
+  const { skills, workspaceReference } = stageWiring[stage];
   return Promise.all([
-    ...stage.skills.map((name) => loadSkill(trustedRepositoryRoot, name)),
+    ...skills.map((name) => loadSkill(trustedRepositoryRoot, name)),
     loadSkill(trustedRepositoryRoot, workspaceSkill),
-    loadSkillReference(trustedRepositoryRoot, workspaceSkill, stage.workspaceReference),
+    loadSkillReference(trustedRepositoryRoot, workspaceSkill, workspaceReference),
   ]);
 }
 
-async function loadStageSkills(trustedRepositoryRoot: string, stages: Record<StageName, StageConfig>, workspaceSkill: string) {
+async function loadStageSkills(trustedRepositoryRoot: string, workspaceSkill: string) {
   return {
-    plan: await loadSkillsForStage(trustedRepositoryRoot, stages.plan, workspaceSkill),
-    planReview: await loadSkillsForStage(trustedRepositoryRoot, stages.planReview, workspaceSkill),
-    write: await loadSkillsForStage(trustedRepositoryRoot, stages.write, workspaceSkill),
-    fix: await loadSkillsForStage(trustedRepositoryRoot, stages.fix, workspaceSkill),
-    lastFix: await loadSkillsForStage(trustedRepositoryRoot, stages.lastFix, workspaceSkill),
+    plan: await loadSkillsForStage(trustedRepositoryRoot, 'plan', workspaceSkill),
+    planReview: await loadSkillsForStage(trustedRepositoryRoot, 'planReview', workspaceSkill),
+    write: await loadSkillsForStage(trustedRepositoryRoot, 'write', workspaceSkill),
+    fix: await loadSkillsForStage(trustedRepositoryRoot, 'fix', workspaceSkill),
+    lastFix: await loadSkillsForStage(trustedRepositoryRoot, 'lastFix', workspaceSkill),
   } satisfies Record<StageName, Skill[]>;
 }
 
@@ -544,7 +545,7 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
   logger.startStep('prepare');
   await buildImages(repositoryRoot);
   const trackedFiles = await listTrackedFiles(repositoryRoot);
-  const agents = await loadStageAgents(repositoryRoot, config.stages);
+  const agents = await loadStageAgents(repositoryRoot);
   const runId = new Date().toISOString().replace(/[:.]/g, '-');
   const transcriptDirectory = path.join(repositoryRoot, '.testeragent', 'runs', runId);
   await mkdir(transcriptDirectory, { recursive: true });
@@ -578,7 +579,7 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
         knownFiles: new Set(trackedFiles),
         testedFilesByTest: new Map(),
         workspace,
-        skills: await loadStageSkills(repositoryRoot, config.stages, workspace.skill),
+        skills: await loadStageSkills(repositoryRoot, workspace.skill),
         agents,
         stages: config.stages,
         loop: config.loop,
