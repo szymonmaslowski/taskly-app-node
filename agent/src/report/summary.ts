@@ -11,6 +11,13 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`) {
 function attentionSentences(workspace: WorkspaceReport) {
   const sentences: string[] = [];
   if (!workspace.applied) sentences.push('Verify failed, so the changes were not applied.');
+  const broken = workspace.pullRequest?.brokenTests ?? [];
+  if (broken.length > 0) {
+    const leftFailing = broken.filter((test) => test.outcome === 'left failing').length;
+    const updated = broken.filter((test) => test.outcome === 'updated by the agent').length;
+    sentences.push(`This PR breaks ${plural(broken.length, 'existing test file')}: ${updated} updated by the agent, ${leftFailing} left failing.`);
+  }
+  if ((workspace.pullRequest?.leftOutByCap.length ?? 0) > 0) sentences.push('The run is partial: some changed files were over the limit.');
   const failedBatches = workspace.failedBatches.length;
   if (failedBatches > 0) sentences.push(`${plural(failedBatches, 'batch', 'batches')} failed and ${failedBatches === 1 ? 'was' : 'were'} rolled back.`);
   const stillFailing = workspace.remainingFailures.length;

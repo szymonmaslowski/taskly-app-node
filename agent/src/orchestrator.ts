@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { z } from 'zod';
 import { loadAgentDefinition, type AgentDefinition } from './agents.ts';
 import type { CoverageByFile } from './analyze/coverage.ts';
+import { planPullRequestWork, readPullRequestDiff } from './analyze/pull-request.ts';
 import { measureCoverage, planRepositoryWork, type WorkBatch } from './analyze/repository.ts';
 import { mapWithConcurrency } from './concurrency.ts';
 import { loadConfig, type LoopConfig, type StageConfig, type WorkspaceConfig } from './config.ts';
@@ -31,6 +32,8 @@ type StageAgents = Record<StageName, AgentDefinition>;
 type WorkspaceContext = {
   name: string;
   repositoryRoot: string;
+  editableExistingTests?: Set<string>;
+  pullRequestDescription?: string;
   knownFiles: Set<string>;
   testedFilesByTest: Map<string, string[]>;
   workspace: WorkspaceConfig;
@@ -89,7 +92,19 @@ export type WorkspaceResult = {
   changes: StagingChanges;
   testFileChanges: TestFileChanges[];
   changedOutsideCases: ChangeOutsideCases[];
+  pullRequest?: PullRequestResult;
   usages: StageUsage[];
+};
+
+export type BrokenTest = {
+  testFile: string;
+  outcome: 'updated by the agent' | 'passes now' | 'left failing';
+};
+
+export type PullRequestResult = {
+  brokenTests: BrokenTest[];
+  leftOutByCap: string[];
+  deletedSources: string[];
 };
 
 let transcriptCounter = 0;
@@ -119,12 +134,23 @@ async function runContextStage<Schema extends z.ZodType>(context: WorkspaceConte
   return output;
 }
 
+// In a pull request, existing tests may change only when they relate to the change; shared fixtures are always in scope and get flagged in the report.
+function findUnrelatedTestEdits(context: WorkspaceContext, modifiedFiles: string[]) {
+  const { editableExistingTests, workspace } = context;
+  if (!editableExistingTests) return [];
+  const isTestFile = createMatcher(workspace.root, workspace.tests);
+  const isShared = createMatcher(workspace.root, workspace.shared);
+  return modifiedFiles.filter((modifiedFile) => isTestFile(modifiedFile) && !isShared(modifiedFile) && !editableExistingTests.has(modifiedFile));
+}
+
 async function checkStagingChanges(context: WorkspaceContext) {
   const changes = await diffStagingCopy(context.directories.staging, context.manifest);
   assertPrintablePaths([...changes.added, ...changes.modified, ...changes.deleted, ...changes.symbolicLinks]);
   if (changes.symbolicLinks.length > 0) throw new Error(`The agent created symbolic links: ${changes.symbolicLinks.join(', ')}`);
   const disallowed = findDisallowedChanges(changes, context.workspace);
   if (disallowed.length > 0) throw new Error(`The agent changed files outside the writable paths: ${disallowed.join(', ')}`);
+  const unrelated = findUnrelatedTestEdits(context, changes.modified);
+  if (unrelated.length > 0) throw new Error(`The agent changed existing tests unrelated to this pull request: ${unrelated.join(', ')}`);
   for (const changedPath of [...changes.added, ...changes.modified]) context.syncedPaths.add(changedPath);
   await syncStagingToRunner(context.directories.staging, context.directories.runner, context.workspace.root, [...context.syncedPaths]);
   return changes;
@@ -263,7 +289,7 @@ async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
     logger.startStep(`plan · ${batch.module} · round ${round}`);
     const plan = await runContextStage(context, {
       stage: 'plan',
-      prompt: buildPlanPrompt({ skills: skills.plan, workItems: batch.items, missingBehaviours, approvedCases }),
+      prompt: buildPlanPrompt({ skills: skills.plan, workItems: batch.items, missingBehaviours, approvedCases, pullRequestDescription: context.pullRequestDescription }),
       outputSchema: planOutputSchema,
     });
     const numberedCases = numberCases(plan, firstCaseNumber);
@@ -278,7 +304,7 @@ async function planBatch(context: WorkspaceContext, batch: WorkBatch) {
     logger.startStep(`plan-review · ${batch.module} · round ${round}`);
     const review = await runContextStage(context, {
       stage: 'planReview',
-      prompt: buildReviewPrompt({ skills: skills.planReview, workItems: batch.items, cases: accepted, approvedCases }),
+      prompt: buildReviewPrompt({ skills: skills.planReview, workItems: batch.items, cases: accepted, approvedCases, pullRequestDescription: context.pullRequestDescription }),
       outputSchema: reviewOutputSchema,
     });
     const roundDecisions = applyReview(accepted, review);
@@ -532,54 +558,93 @@ async function loadStageSkills(trustedRepositoryRoot: string, workspaceSkill: st
   } satisfies Record<StageName, Skill[]>;
 }
 
-type RunRepositoryModeOptions = {
+export type RunMode =
+  | { kind: 'repo'; modulePrefix?: string; maxBatches?: number }
+  | { kind: 'pr'; baseSha: string; headSha: string; description?: string };
+
+type RunAgentOptions = {
+  trustedRepositoryRoot: string;
   repositoryRoot: string;
   logger: Logger;
+  mode: RunMode;
   workspaceNames?: string[];
-  modulePrefix?: string;
-  maxBatches?: number;
 };
 
-export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames, modulePrefix, maxBatches }: RunRepositoryModeOptions) {
-  const config = await loadConfig(repositoryRoot);
-  logger.startStep('prepare');
-  await buildImages(repositoryRoot);
-  const trackedFiles = await listTrackedFiles(repositoryRoot);
-  const agents = await loadStageAgents(repositoryRoot);
-  const runId = new Date().toISOString().replace(/[:.]/g, '-');
-  const transcriptDirectory = path.join(repositoryRoot, '.testeragent', 'runs', runId);
-  await mkdir(transcriptDirectory, { recursive: true });
-  logger.endStep('images built, agents loaded');
+function failingTestFiles(workspaceRoot: string, testRun: { cases: TestCaseResult[]; fileErrors: { file: string }[] }) {
+  const files = [...testRun.cases.filter((testCase) => testCase.status === 'failed').map((testCase) => testCase.file), ...testRun.fileErrors.map((error) => error.file)];
+  return [...new Set(files)].map((file) => `${workspaceRoot}/${file}`).sort();
+}
 
+function describeBrokenTests(brokenBefore: string[], failingAfter: string[], changes: StagingChanges): BrokenTest[] {
+  const changedPaths = new Set([...changes.added, ...changes.modified]);
+  return brokenBefore.map((testFile) => {
+    if (failingAfter.includes(testFile)) return { testFile, outcome: 'left failing' };
+    return { testFile, outcome: changedPaths.has(testFile) ? 'updated by the agent' : 'passes now' };
+  });
+}
+
+// The base checkout supplies everything that runs or instructs: config, images, agents and skills. The tested checkout is only read, staged and run in containers.
+export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, mode, workspaceNames }: RunAgentOptions) {
+  const config = await loadConfig(trustedRepositoryRoot);
+  logger.startStep('prepare');
+  await buildImages(trustedRepositoryRoot);
+  const trackedFiles = await listTrackedFiles(repositoryRoot);
+  const agents = await loadStageAgents(trustedRepositoryRoot);
+  const changedFiles = mode.kind === 'pr' ? await readPullRequestDiff(repositoryRoot, mode.baseSha, mode.headSha) : [];
+  const runId = new Date().toISOString().replace(/[:.]/g, '-');
+  const transcriptDirectory = path.join(trustedRepositoryRoot, '.testeragent', 'runs', runId);
+  await mkdir(transcriptDirectory, { recursive: true });
+  logger.endStep(mode.kind === 'pr' ? `images built, agents loaded, ${changedFiles.length} files changed in the pull request` : 'images built, agents loaded');
+
+  const readRepositoryFile = (relativePath: string) => readRegularFile(path.join(repositoryRoot, relativePath), maxRepositoryFileBytes);
   const results: WorkspaceResult[] = [];
   for (const [name, workspace] of Object.entries(config.workspaces)) {
     if (workspaceNames && !workspaceNames.includes(name)) continue;
+    if (mode.kind === 'pr' && !changedFiles.some((file) => file.path.startsWith(`${workspace.root}/`) || file.status === 'renamed' && file.previousPath.startsWith(`${workspace.root}/`))) {
+      logger.info(`${name}: no files changed in the pull request`);
+      continue;
+    }
     const directories = await createRunDirectories();
     try {
       logger.startStep(`analyze · ${name}`);
       await prepareRunnerWorkspace({ repositoryRoot, trackedFiles, workspace, destination: directories.runner });
       await installRunnerWorkspace(directories.runner, directories.output, workspace);
-      const { coverage } = await measureCoverage({ runnerDirectory: directories.runner, outputDirectory: directories.output, workspace });
-      const work = await planRepositoryWork({
-        workspaceName: name,
-        workspace,
-        trackedFiles,
-        coverage,
-        readRepositoryFile: (relativePath) => readRegularFile(path.join(repositoryRoot, relativePath), maxRepositoryFileBytes),
-      });
-      const batches = work.batches
-        .filter((batch) => !modulePrefix || batch.module.startsWith(modulePrefix))
-        .slice(0, maxBatches);
-      logger.endStep(`${batches.length} batches to work on, ${work.fullyCovered.length} files already fully covered`);
+      const typecheckBefore = await runTypecheck(directories.runner, directories.output, workspace);
+      const { coverage, testRun: testRunBefore } = await measureCoverage({ runnerDirectory: directories.runner, outputDirectory: directories.output, workspace });
+      const brokenBefore = failingTestFiles(workspace.root, testRunBefore);
+      let batches: WorkBatch[];
+      let fullyCovered: string[] = [];
+      let pullRequestScope: Awaited<ReturnType<typeof planPullRequestWork>> | undefined;
+      if (mode.kind === 'pr') {
+        pullRequestScope = await planPullRequestWork({
+          workspaceName: name,
+          workspace,
+          trackedFiles,
+          readRepositoryFile,
+          coverage,
+          changedFiles,
+          failingTestFiles: brokenBefore,
+          maxChangedSourceFiles: config.limits.maxChangedSourceFiles,
+        });
+        batches = pullRequestScope.batches;
+        logger.endStep(`${batches.length} batches to work on, ${brokenBefore.length} existing test files failing on the head`);
+      } else {
+        const work = await planRepositoryWork({ workspaceName: name, workspace, trackedFiles, coverage, readRepositoryFile });
+        batches = work.batches.filter((batch) => !mode.modulePrefix || batch.module.startsWith(mode.modulePrefix)).slice(0, mode.maxBatches);
+        fullyCovered = work.fullyCovered;
+        logger.endStep(`${batches.length} batches to work on, ${fullyCovered.length} files already fully covered`);
+      }
 
       const manifest = await createStagingCopy({ repositoryRoot, trackedFiles, workspace, destination: directories.staging });
       const context: WorkspaceContext = {
         name,
         repositoryRoot,
+        editableExistingTests: pullRequestScope?.relatedTests,
+        pullRequestDescription: mode.kind === 'pr' ? mode.description : undefined,
         knownFiles: new Set(trackedFiles),
         testedFilesByTest: new Map(),
         workspace,
-        skills: await loadStageSkills(repositoryRoot, workspace.skill),
+        skills: await loadStageSkills(trustedRepositoryRoot, workspace.skill),
         agents,
         stages: config.stages,
         loop: config.loop,
@@ -596,8 +661,14 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
       logger.startStep(`verify · ${name}`);
       const typecheck = await runTypecheck(directories.runner, directories.output, workspace);
       const after = await measureCoverage({ runnerDirectory: directories.runner, outputDirectory: directories.output, workspace });
+      const failingAfter = failingTestFiles(workspace.root, after.testRun);
       const testsFailed = after.testRun.cases.filter((testCase) => testCase.status === 'failed').length + after.testRun.fileErrors.length;
       const suitePassed = typecheck.passed && testsFailed === 0;
+      // In a pull request the developer's own failures are reported, not fixed by force, so only failures the agent introduced block the result.
+      const passed =
+        mode.kind === 'pr'
+          ? (typecheck.passed || !typecheckBefore.passed) && failingAfter.every((testFile) => brokenBefore.includes(testFile))
+          : suitePassed;
       // The thresholds run the repository's own test command, so a failing suite would read as thresholds not met.
       const thresholdsMet = suitePassed && (await checkRepositoryThresholds(directories.runner, directories.output, workspace));
       const verify: VerifyResult = {
@@ -617,7 +688,7 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
         if (fileChanges.length > 0) testFileChanges.push({ testFile, changes: fileChanges });
       }
       const changedOutsideCases = await findChangesOutsideCases(context, changes.modified);
-      if (suitePassed) await applyStagingToRepository(directories.staging, repositoryRoot, changes);
+      if (passed) await applyStagingToRepository(directories.staging, repositoryRoot, changes);
       else logger.info(`${name}: verify failed, so the changes were not applied`);
       results.push({
         name,
@@ -631,12 +702,17 @@ export async function runRepositoryMode({ repositoryRoot, logger, workspaceNames
         coverageBefore: coverage,
         coverageAfter: after.coverage,
         verify,
-        applied: suitePassed,
-        fullyCovered: work.fullyCovered,
+        applied: passed,
+        fullyCovered,
         batches: batchResults,
         changes,
         testFileChanges,
         changedOutsideCases,
+        pullRequest: pullRequestScope && {
+          brokenTests: describeBrokenTests(brokenBefore, failingAfter, changes),
+          leftOutByCap: pullRequestScope.leftOutByCap,
+          deletedSources: pullRequestScope.deletedSources,
+        },
         usages: context.usages,
       });
     } finally {

@@ -1,4 +1,5 @@
 import type { FileCoverage } from '../analyze/coverage.ts';
+import type { PullRequestResult } from '../orchestrator.ts';
 import type { Fraction, RunReport, WorkspaceReport } from './report.ts';
 
 export function escapeMarkdown(text: string) {
@@ -30,9 +31,31 @@ function lists(...renderedLists: string[]) {
   return renderedLists.filter((renderedList) => renderedList.length > 0).join('\n');
 }
 
+function renderPullRequestScope({ brokenTests, leftOutByCap, deletedSources }: PullRequestResult) {
+  const lines: string[] = [];
+  if (brokenTests.length > 0) {
+    lines.push(
+      `### Your PR breaks ${brokenTests.length} existing test ${brokenTests.length === 1 ? 'file' : 'files'}`,
+      '',
+      'These failed on the PR head before the agent changed anything. Check whether each change in behaviour is intended.',
+      '',
+      list(brokenTests, (broken) => `\`${escapeCode(broken.testFile)}\`: ${broken.outcome}`),
+      '',
+    );
+  }
+  if (leftOutByCap.length > 0) {
+    lines.push(`**Partial run:** ${leftOutByCap.length} changed source files over the limit were left out:`, '', list(leftOutByCap, (file) => `\`${escapeCode(file)}\``), '');
+  }
+  if (deletedSources.length > 0) {
+    lines.push('Source files deleted in this PR. The agent leaves their tests in place:', '', list(deletedSources, (file) => `\`${escapeCode(file)}\``), '');
+  }
+  return lines;
+}
+
 function renderWorkspace(workspace: WorkspaceReport) {
   const lines: string[] = [`## ${escapeMarkdown(workspace.name)}`, ''];
   if (!workspace.applied) lines.push('**The changes were not applied, because verify failed.**', '');
+  if (workspace.pullRequest) lines.push(...renderPullRequestScope(workspace.pullRequest));
   const { verify, coverage } = workspace;
   lines.push(
     `Typecheck ${verify.typecheckPassed ? 'passed' : 'failed'}. Tests: ${verify.testsPassed} passed, ${verify.testsFailed} failed. Repository coverage thresholds ${verify.repositoryThresholds}.`,

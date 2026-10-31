@@ -95,6 +95,27 @@ describe('buildRunReport', () => {
     expect(buildSummary(report)).toContain('1 planned case kept without a review verdict.');
   });
 
+  it('puts the existing tests a pull request breaks first, with what happened to each', () => {
+    const pullRequest: WorkspaceResult = {
+      ...result,
+      pullRequest: {
+        brokenTests: [
+          { testFile: 'backend/tests/validators.test.ts', outcome: 'updated by the agent' },
+          { testFile: 'backend/tests/router.test.ts', outcome: 'left failing' },
+        ],
+        leftOutByCap: ['backend/src/mappers.ts'],
+        deletedSources: [],
+      },
+    };
+    const report = buildRunReport([pullRequest], 'pr');
+    const markdown = renderMarkdownReport(report);
+    expect(report.mode).toBe('pr');
+    expect(markdown).toContain('### Your PR breaks 2 existing test files');
+    expect(markdown).toContain('- `backend/tests/router.test.ts`: left failing');
+    expect(markdown.indexOf('### Your PR breaks')).toBeLessThan(markdown.indexOf('| Coverage |'));
+    expect(buildSummary(report)).toMatch(/^backend: This PR breaks 2 existing test files: 1 updated by the agent, 1 left failing\. The run is partial/);
+  });
+
   it('lists the skills of the stages that ran', () => {
     expect(buildRunReport([result]).workspaces[0].skillsUsed).toEqual(['unit-test-principles', 'unit-test-planning', 'backend-unit-tests', 'unit-test-reviewing', 'unit-test-writing']);
     const fixed: WorkspaceResult = { ...result, batches: [{ ...result.batches[0], fixAttempts: 1 }] };
