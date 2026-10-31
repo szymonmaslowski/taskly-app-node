@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { z } from 'zod';
 import { loadAgentDefinition, type AgentDefinition } from './agents.ts';
 import type { CoverageByFile } from './analyze/coverage.ts';
-import { classifyOnBase, type BaseCheckCase } from './analyze/base-check.ts';
+import { classifyOnBase, combineOutcomes, type BaseCheckCase, type BaseCheckOutcome } from './analyze/base-check.ts';
 import { planPullRequestWork, readFileAtCommit, readPullRequestDiff, type ChangedFile } from './analyze/pull-request.ts';
 import { measureCoverage, planRepositoryWork, type WorkBatch } from './analyze/repository.ts';
 import { mapWithConcurrency } from './concurrency.ts';
@@ -563,12 +563,13 @@ async function checkAgainstBase(context: WorkspaceContext): Promise<BaseCheckCas
       const workspacePath = testFile.slice(prefix.length);
       const staged = (await readStagedFile(context, testFile)) ?? '';
       const loadFailed = testRun.fileErrors.some((error) => error.file === workspacePath);
-      const fileCases = testRun.cases.filter((testCase) => testCase.file === workspacePath);
-      for (const testCase of fileCases) {
-        const isAgentCase = findCasesByRuntimeNames(testFile, staged, [testCase.fullName]).some((match) => names.has(match.name));
-        if (isAgentCase) results.push({ testFile, name: testCase.fullName, outcome: loadFailed ? 'inconclusive' : classifyOnBase(testCase) });
+      const outcomesByCase = new Map<string, BaseCheckOutcome[]>([...names].map((name) => [name, []]));
+      for (const testCase of testRun.cases.filter((candidate) => candidate.file === workspacePath)) {
+        for (const match of findCasesByRuntimeNames(testFile, staged, [testCase.fullName])) {
+          outcomesByCase.get(match.name)?.push(loadFailed ? 'inconclusive' : classifyOnBase(testCase));
+        }
       }
-      if (fileCases.length === 0) for (const name of names) results.push({ testFile, name, outcome: 'inconclusive' });
+      for (const [name, outcomes] of outcomesByCase) results.push({ testFile, name, outcome: combineOutcomes(outcomes) });
     }
   } finally {
     await placeChangedSources(context, pullRequestBase, 'head');

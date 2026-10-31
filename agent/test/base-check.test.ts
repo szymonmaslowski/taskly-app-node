@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyOnBase } from '../src/analyze/base-check.ts';
+import { classifyOnBase, combineOutcomes } from '../src/analyze/base-check.ts';
 import type { TestCaseResult } from '../src/sandbox/test-results.ts';
 
 function testCase(status: TestCaseResult['status'], failureMessages: string[] = []): TestCaseResult {
@@ -20,5 +20,14 @@ describe('classifyOnBase', () => {
   it('marks a passing case and a skipped one', () => {
     expect(classifyOnBase(testCase('passed'))).toBe('passes on base');
     expect(classifyOnBase(testCase('skipped'))).toBe('inconclusive');
+  });
+});
+
+describe('combineOutcomes', () => {
+  it('counts a table case as noticing the change when any row fails on base', () => {
+    expect(combineOutcomes(['passes on base', 'fails on base', 'inconclusive'])).toBe('fails on base');
+    expect(combineOutcomes(['passes on base', 'passes on base'])).toBe('passes on base');
+    expect(combineOutcomes(['passes on base', 'inconclusive'])).toBe('inconclusive');
+    expect(combineOutcomes([])).toBe('inconclusive');
   });
 });
