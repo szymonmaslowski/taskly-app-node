@@ -47,8 +47,23 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Invalid query parameters"
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "due_before",
+            "in": "query",
+            "required": false,
+            "description": "Only tasks with a due date on or before this date. Tasks without a due date are left out.",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ]
       },
       "post": {
         "requestBody": {
