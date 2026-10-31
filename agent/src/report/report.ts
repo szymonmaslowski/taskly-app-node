@@ -1,5 +1,5 @@
 import type { CoverageByFile, FileCoverage } from '../analyze/coverage.ts';
-import type { ChangeOutsideCases, VerifyResult, WorkspaceResult } from '../orchestrator.ts';
+import type { ChangeOutsideCases, PullRequestResult, RunMode, VerifyResult, WorkspaceResult } from '../orchestrator.ts';
 import type { StageUsage } from '../run-stage.ts';
 
 export type Fraction = { covered: number; total: number };
@@ -37,6 +37,7 @@ export type WorkspaceReport = {
   addedCases: { testFile: string; names: string[] }[];
   existingTestsChanged: ExistingTestChange[];
   changedOutsideCases: ChangeOutsideCases[];
+  pullRequest?: PullRequestResult;
   droppedByReview: { sourceFile: string; name: string; reason: string }[];
   keptWithoutReview: { testFile: string; name: string }[];
   rejectedByChecks: { name: string; reason: string }[];
@@ -51,7 +52,7 @@ export type WorkspaceReport = {
 };
 
 export type RunReport = {
-  mode: 'repo';
+  mode: RunMode['kind'];
   workspaces: WorkspaceReport[];
   usage: UsageSummary[];
   summary?: string;
@@ -136,6 +137,7 @@ export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {
       }),
     ),
     changedOutsideCases: result.changedOutsideCases,
+    pullRequest: result.pullRequest,
     droppedByReview: batches.flatMap((batch) =>
       batch.decisions
         .filter((decision) => decision.verdict === 'drop')
@@ -158,9 +160,9 @@ export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {
   };
 }
 
-export function buildRunReport(results: WorkspaceResult[]): RunReport {
+export function buildRunReport(results: WorkspaceResult[], mode: RunMode['kind'] = 'repo'): RunReport {
   return {
-    mode: 'repo',
+    mode,
     workspaces: results.map(buildWorkspaceReport),
     usage: summariseUsage(results.flatMap((result) => result.usages)),
   };
