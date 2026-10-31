@@ -1,0 +1,239 @@
+name: Test agent
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+
+permissions: {}
+
+# Values that come from the pull request (branch names, descriptions, SHAs) only ever reach scripts through env,
+# never through ${{ }} inside a run block, so they can't be interpreted as shell.
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      run: ${{ steps.pr.outputs.run }}
+      number: ${{ steps.pr.outputs.number }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      head_ref: ${{ steps.pr.outputs.head_ref }}
+    steps:
+      - id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          [[ "$NUMBER" =~ ^[0-9]+$ ]] || { echo "Not a pull request number: $NUMBER"; exit 1; }
+          pr="$(gh api "repos/$REPOSITORY/pulls/$NUMBER")"
+          skip() { echo "run=false" >> "$GITHUB_OUTPUT"; echo "Test agent skipped: $1" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          [[ "$(jq -r '.head.repo.full_name' <<< "$pr")" == "$REPOSITORY" ]] || skip "pull requests from forks are not supported"
+          [[ "$(jq -r '.state' <<< "$pr")" == "open" ]] || skip "the pull request is not open"
+          [[ "$(jq -r '.draft' <<< "$pr")" == "false" ]] || skip "the pull request is a draft"
+          [[ "$(jq -r '.user.login' <<< "$pr")" != "github-actions[bot]" ]] || skip "the pull request was opened by the test agent"
+          head_ref="$(jq -r '.head.ref' <<< "$pr")"
+          [[ "$head_ref" != *--agent-tests ]] || skip "the pull request holds agent tests"
+          {
+            echo "run=true"
+            echo "number=$NUMBER"
+            echo "base_sha=$(jq -r '.base.sha' <<< "$pr")"
+            echo "head_sha=$(jq -r '.head.sha' <<< "$pr")"
+            echo "head_ref=$head_ref"
+          } >> "$GITHUB_OUTPUT"
+
+  start:
+    needs: guard
+    if: needs.guard.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      checks: write
+    outputs:
+      check_run_id: ${{ steps.check.outputs.id }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ needs.guard.outputs.head_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          id="$(gh api "repos/$REPOSITORY/check-runs" -f name=testeragent -f head_sha="$HEAD_SHA" -f status=in_progress -f details_url="$RUN_URL" --jq .id)"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  generate:
+    needs: [guard, start]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: claude
+    permissions:
+      contents: read
+      pull-requests: read
+    concurrency:
+      group: testeragent-generate-${{ needs.guard.outputs.number }}
+      cancel-in-progress: true
+    outputs:
+      applied: ${{ steps.agent.outputs.applied }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.base_sha }}
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.head_sha }}
+          path: head
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Install the agent from the base branch
+        working-directory: base/agent
+        run: npm ci --ignore-scripts
+      - name: Read the pull request description
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          NUMBER: ${{ needs.guard.outputs.number }}
+        run: gh api "repos/$REPOSITORY/pulls/$NUMBER" --jq '.body // ""' > "$RUNNER_TEMP/description.txt"
+      - id: agent
+        name: Run the agent
+        working-directory: base
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          BASE_SHA: ${{ needs.guard.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.guard.outputs.head_sha }}
+        run: |
+          set +e
+          node agent/src/cli.ts --mode pr --repository ../head --base "$BASE_SHA" --head "$HEAD_SHA" --description-file "$RUNNER_TEMP/description.txt"
+          status=$?
+          set -e
+          [[ $status -le 1 ]] || exit "$status"
+          echo "applied=$([[ $status -eq 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+      - name: Collect the patch and the report
+        run: |
+          mkdir -p out
+          run_directory="$(find base/.testeragent/runs -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+          cp "$run_directory/report.json" "$run_directory/report.md" out/
+          node base/agent/src/ci.ts export-patch --repository head --output out/patch.diff
+      - name: Scan the outgoing files for secrets
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node base/agent/src/ci.ts scan-secrets --env CLAUDE_CODE_OAUTH_TOKEN --env GITHUB_TOKEN out/patch.diff out/report.json out/report.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: testeragent-generate
+          path: out/
+          retention-days: 1
+
+  verify:
+    needs: [guard, generate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.base_sha }}
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.head_sha }}
+          path: head
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - working-directory: base/agent
+        run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: testeragent-generate
+          path: out
+      - name: Validate, apply and test the patch without secrets
+        run: |
+          mkdir -p verified
+          if [[ ! -s out/patch.diff ]]; then echo '{"workspaces":[],"problems":[]}' > verified/verify.json; exit 0; fi
+          node base/agent/src/ci.ts validate-patch --checkout head --patch out/patch.diff
+          git -C head apply ../out/patch.diff
+          git -C head add -A
+          node base/agent/src/ci.ts verify --repository head --output verified/verify.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: testeragent-verify
+          path: verified/
+          retention-days: 1
+
+  publish:
+    needs: [guard, start, generate, verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+    concurrency:
+      group: testeragent-publish-${{ needs.guard.outputs.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.base_sha }}
+          path: base
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.guard.outputs.head_sha }}
+          path: head
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - working-directory: base/agent
+        run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: testeragent-generate
+          path: out
+      - name: Publish the tests, the report and the check run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          NUMBER: ${{ needs.guard.outputs.number }}
+          HEAD_SHA: ${{ needs.guard.outputs.head_sha }}
+          HEAD_REF: ${{ needs.guard.outputs.head_ref }}
+          APPLIED: ${{ needs.generate.outputs.applied }}
+          CHECK_RUN_ID: ${{ needs.start.outputs.check_run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash base/.github/scripts/testeragent-publish.sh
+
+  finalize:
+    needs: [guard, start, generate, verify, publish]
+    if: always() && needs.start.result == 'success' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      checks: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CHECK_RUN_ID: ${{ needs.start.outputs.check_run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api -X PATCH "repos/$REPOSITORY/check-runs/$CHECK_RUN_ID" -f status=completed -f conclusion=failure \
+            -f 'output[title]=Agent failed' -f "output[summary]=The test agent didn't finish. See the run: $RUN_URL"
