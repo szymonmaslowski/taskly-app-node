@@ -14,7 +14,8 @@ complete_check() {
     -f "output[title]=$title" -F "output[summary]=@$summary_file" > /dev/null
 }
 
-current_head="$(gh api "repos/$REPOSITORY/pulls/$NUMBER" --jq .head.sha)"
+source_pull_request="$(gh api "repos/$REPOSITORY/pulls/$NUMBER")"
+current_head="$(jq -r .head.sha <<< "$source_pull_request")"
 if [[ "$current_head" != "$HEAD_SHA" ]]; then
   echo "The pull request moved on to $current_head, so a newer run publishes its results." | tee "$RUNNER_TEMP/superseded.md"
   complete_check neutral "Superseded by a newer commit" "$RUNNER_TEMP/superseded.md"
@@ -33,6 +34,7 @@ if [[ -s out/patch.diff ]]; then
   git -C head -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
     push -q --force "https://github.com/$REPOSITORY.git" "HEAD:refs/heads/$branch"
 
+  stacked_title="$(jq -r .title <<< "$source_pull_request") [testeragent]"
   stacked_body="$RUNNER_TEMP/stacked.md"
   {
     echo "Tests written by the test agent for #$NUMBER. Merge this pull request into the source branch to add them."
@@ -44,9 +46,9 @@ if [[ -s out/patch.diff ]]; then
   owner="${REPOSITORY%%/*}"
   stacked_number="$(gh api -X GET "repos/$REPOSITORY/pulls" -f head="$owner:$branch" -f state=open --jq '.[0].number // empty')"
   if [[ -n "$stacked_number" ]]; then
-    gh api -X PATCH "repos/$REPOSITORY/pulls/$stacked_number" -F "body=@$stacked_body" > /dev/null
+    gh api -X PATCH "repos/$REPOSITORY/pulls/$stacked_number" -f title="$stacked_title" -F "body=@$stacked_body" > /dev/null
   else
-    stacked_number="$(gh api "repos/$REPOSITORY/pulls" -f title="Agent tests for #$NUMBER" -f head="$branch" -f base="$HEAD_REF" \
+    stacked_number="$(gh api "repos/$REPOSITORY/pulls" -f title="$stacked_title" -f head="$branch" -f base="$HEAD_REF" \
       -F "body=@$stacked_body" --jq .number)"
   fi
 fi
