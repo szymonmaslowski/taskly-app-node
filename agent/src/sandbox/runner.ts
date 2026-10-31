@@ -140,6 +140,7 @@ type RunTestsOptions = {
   workspace: WorkspaceConfig;
   testFiles?: string[];
   coverage?: boolean;
+  shuffle?: boolean;
 };
 
 // The wrapper lives in its own host directory, mounted read-only, so the host never writes into the tree PR code has run in.
@@ -149,17 +150,18 @@ async function writeWrapperDirectory(workspaceConfigFile: string) {
   return wrapperDirectory;
 }
 
-export async function runTests({ workspaceDirectory, outputDirectory, workspace, testFiles = [], coverage = false }: RunTestsOptions) {
+export async function runTests({ workspaceDirectory, outputDirectory, workspace, testFiles = [], coverage = false, shuffle = false }: RunTestsOptions) {
   const workspaceConfigFile = await findVitestConfig(workspaceDirectory);
   const wrapperDirectory = await writeWrapperDirectory(workspaceConfigFile);
   await resetDirectory(outputDirectory);
 
   const coverageFlag = coverage ? ' --coverage.enabled=true' : '';
+  const shuffleFlag = shuffle ? ' --sequence.shuffle' : '';
   const result = await runInRunner({
     workspaceDirectory,
     outputDirectory,
     readOnlyMounts: [{ source: wrapperDirectory, target: wrapperMountPath }],
-    command: `${workspace.commands.test} --config ${wrapperMountPath}/${wrapperFileName}${coverageFlag}`,
+    command: `${workspace.commands.test} --config ${wrapperMountPath}/${wrapperFileName}${coverageFlag}${shuffleFlag}`,
     args: testFiles,
     network: false,
     timeoutMilliseconds: 600_000,

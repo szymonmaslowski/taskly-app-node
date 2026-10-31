@@ -53,6 +53,7 @@ export default defineConfig({
     write: { model: 'claude-sonnet-5-5', effort: 'medium', maxTurns: 20, timeoutMinutes: 15, maxBudgetUsd: 4 },
     fix: { model: 'claude-sonnet-5-5', effort: 'medium', maxTurns: 12, timeoutMinutes: 10, maxBudgetUsd: 3 },
     lastFix: { model: 'claude-opus-5-5', effort: 'high', maxTurns: 15, timeoutMinutes: 12, maxBudgetUsd: 5 },
+    implReview: { model: 'claude-opus-5-5', effort: 'high', maxTurns: 20, timeoutMinutes: 12, maxBudgetUsd: 4 },
   },
   loop: {
     planRounds: 2,
@@ -61,5 +62,11 @@ export default defineConfig({
     fixAttempts: 3,
     // Fixers share one writable staging copy, so two of them could edit the same fixture at once.
     agentParallelism: 1,
+    // Planning only reads files, so batches can be planned at once.
+    planParallelism: 4,
+    // Extra shuffled runs of the changed test files; a case that both passes and fails across them is flaky.
+    flakyReruns: 2,
+    // Reviews of the written tests; blocker and major findings send the tests back to the writer, the tests and the fixer. 0 turns the review off.
+    implReviewRounds: 1,
   },
 });

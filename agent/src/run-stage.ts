@@ -7,6 +7,7 @@ import type { AgentDefinition } from './agents.ts';
 import type { Logger } from './logger.ts';
 import type { stageEfforts } from './stages.ts';
 import { createContainerName, runContainer } from './sandbox/containers.ts';
+import type { EgressRoute } from './sandbox/egress.ts';
 import { agentImage } from './sandbox/images.ts';
 
 const containerWorkingDirectory = '/workspace';
@@ -145,12 +146,18 @@ export function buildClaudeArguments({ agent, model, settings, jsonSchema }: Cla
   ];
 }
 
-export function buildDockerArguments(workingDirectory: string, writable: boolean, credentialArguments: string[]) {
+export function buildDockerArguments(workingDirectory: string, writable: boolean, credentialArguments: string[], egress: EgressRoute) {
   const { uid, gid } = userInfo();
   return [
     '--interactive',
     '--user',
     `${uid}:${gid}`,
+    '--network',
+    egress.network,
+    '--env',
+    `HTTPS_PROXY=${egress.proxyUrl}`,
+    '--env',
+    `HTTP_PROXY=${egress.proxyUrl}`,
     ...credentialArguments,
     '--tmpfs',
     `/home/agent:uid=${uid},gid=${gid}`,
@@ -183,12 +190,13 @@ type RunStageOptions<Schema extends z.ZodType> = {
   logger: Logger;
   maxOutputAttempts: number;
   model: string;
+  egress: EgressRoute;
   transcriptFile?: string;
 };
 
 async function runAttempt<Schema extends z.ZodType>(options: RunStageOptions<Schema>, prompt: string, model: string) {
-  const { agent, workingDirectory, outputSchema, settings, logger, transcriptFile } = options;
-  const dockerArguments = buildDockerArguments(workingDirectory, isWritingAgent(agent), resolveCredentialArguments());
+  const { agent, workingDirectory, outputSchema, settings, logger, egress, transcriptFile } = options;
+  const dockerArguments = buildDockerArguments(workingDirectory, isWritingAgent(agent), resolveCredentialArguments(), egress);
   const jsonSchema = z.toJSONSchema(outputSchema, { target: 'draft-7' });
   const claudeArguments = buildClaudeArguments({ agent, model, settings, jsonSchema });
   let resultEvent: ResultEvent | undefined;

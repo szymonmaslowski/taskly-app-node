@@ -45,17 +45,18 @@ const loopSchema = z.strictObject({
   outputAttempts: z.number().int().min(1).max(loopCaps.outputAttempts),
   fixAttempts: z.number().int().min(0).max(loopCaps.fixAttempts),
   agentParallelism: z.number().int().min(1).max(loopCaps.agentParallelism),
+  planParallelism: z.number().int().min(1).max(loopCaps.planParallelism),
+  flakyReruns: z.number().int().min(0).max(loopCaps.flakyReruns),
+  implReviewRounds: z.number().int().min(0).max(loopCaps.implReviewRounds),
 });
 
 export const configSchema = z.strictObject({
   workspaces: z
     .record(lowercaseName, workspaceSchema)
     .refine((workspaces) => Object.keys(workspaces).length > 0, 'at least one workspace is required'),
-  flakyReruns: z.number().int().min(0).default(2),
   limits: z
     .strictObject({
       maxChangedSourceFiles: z.number().int().positive().default(15),
-      maxChangedLines: z.number().int().positive().default(1500),
     })
     .prefault({}),
   stages: z.strictObject({
@@ -64,6 +65,7 @@ export const configSchema = z.strictObject({
     write: stageSchema,
     fix: stageSchema,
     lastFix: stageSchema,
+    implReview: stageSchema,
   }),
   loop: loopSchema,
 });
