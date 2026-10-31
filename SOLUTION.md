@@ -149,7 +149,12 @@ Merging #16 into #15 makes #15 green. The next run then finds nothing to add and
 - **Isolation.** The token only in a workflow that runs from the base branch (`workflow_run`), so a PR can't change the workflow that holds it.
 - **Speed.** Images built on push to `main`, pushed to GHCR and pinned by digest. A cheap path that re-verifies without the model when only tests changed. Relevant files inlined into prompts to save the model's read turns.
 - **Better tests.** Mutation testing on changed files.
-- **Better input.** `!testeragent` comment directives to ask for or skip cases.
+- **A developer loop through PR comments.** Designed, not built:
+  - A comment starting with `!testeragent` on the source or the stacked PR starts a run. The comment job checks out no code, checks through the API that the author has write, maintain or admin access, ignores quotes and code blocks, and dispatches the normal workflow with the PR number, so the same guard and sandbox apply.
+  - The run collects the permitted directives in order, later ones winning over earlier ones that conflict, such as `!testeragent add a case where due_before is today`. They reach the planner as requests it must plan for; the plan reviewer can't drop them, and the report says what came of each.
+  - `!testeragent skip` completes the check as "Skipped by @user" without running the agent; `resume` undoes it.
+  - Directives are untrusted text like the PR description: they steer which tests get written, never what the agent may do.
+  - A `## Test notes` section in the PR template, read as declared intent: which behaviour changes are deliberate.
 - **Reach.** Integration tests against a Postgres service container. Support for fork PRs through a maintainer-approved flow. Check run annotations on the lines the report mentions.
 
 ## Alternatives considered
