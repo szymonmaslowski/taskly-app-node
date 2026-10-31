@@ -17,7 +17,7 @@ import { checkRepositoryThresholds, installRunnerWorkspace, prepareRunnerWorkspa
 import { createStagingCopy, diffStagingCopy, findDisallowedChanges, type StagingChanges, type StagingManifest } from './sandbox/staging.ts';
 import { applyStagingToRepository, syncStagingToRunner } from './sandbox/sync.ts';
 import type { TestCaseResult } from './sandbox/test-results.ts';
-import { loadSkill, loadSkillReference, type Skill } from './skills.ts';
+import { loadSkill, loadSkillReference, loadTestingRules, type Skill } from './skills.ts';
 import { applyReview, numberCases, partitionPlannedCases, type CaseDecision } from './stages/plan.ts';
 import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt, type FileFailures } from './stages/prompts.ts';
 import { fixOutputSchema, planOutputSchema, reviewOutputSchema, writeOutputSchema, type PlannedCase } from './stages/schemas.ts';
@@ -341,6 +341,7 @@ async function fixFailures(context: WorkspaceContext, batchStart: BatchSnapshot,
           cases: cases.filter((plannedCase) => plannedCase.testFile === fileFailures.testFile),
           attempt,
           maxAttempts: context.loop.fixAttempts,
+          pullRequestDescription: context.pullRequestDescription,
         }),
         outputSchema: fixOutputSchema,
       });
@@ -468,7 +469,7 @@ async function processBatch(context: WorkspaceContext, batch: WorkBatch, batchSt
   context.logger.startStep(`write · ${batch.module}`);
   const written = await runContextStage(context, {
     stage: 'write',
-    prompt: buildWritePrompt({ skills: context.skills.write, cases: keptCases }),
+    prompt: buildWritePrompt({ skills: context.skills.write, cases: keptCases, pullRequestDescription: context.pullRequestDescription }),
     outputSchema: writeOutputSchema,
   });
   await checkStagingChanges(context);
@@ -541,11 +542,13 @@ async function loadStageAgents(trustedRepositoryRoot: string): Promise<StageAgen
 
 async function loadSkillsForStage(trustedRepositoryRoot: string, stage: StageName, workspaceSkill: string) {
   const { skills, workspaceReference } = stageWiring[stage];
-  return Promise.all([
+  const loaded = await Promise.all([
     ...skills.map((name) => loadSkill(trustedRepositoryRoot, name)),
     loadSkill(trustedRepositoryRoot, workspaceSkill),
     loadSkillReference(trustedRepositoryRoot, workspaceSkill, workspaceReference),
   ]);
+  const testingRules = await loadTestingRules(trustedRepositoryRoot);
+  return testingRules ? [...loaded, testingRules] : loaded;
 }
 
 async function loadStageSkills(trustedRepositoryRoot: string, workspaceSkill: string) {

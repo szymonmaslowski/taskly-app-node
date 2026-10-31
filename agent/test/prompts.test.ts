@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt } from '../src/stages/prompts.ts';
+import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt } from '../src/stages/prompts.ts';
 import type { PlannedCase } from '../src/stages/schemas.ts';
 
 const skills = [{ name: 'backend-unit-tests', instructions: 'Use Supertest.' }];
@@ -48,6 +48,27 @@ describe('skills in prompts', () => {
     });
     expect(prompt.indexOf('### unit-test-planning\n\nPlan behaviours.')).toBeGreaterThan(-1);
     expect(prompt.indexOf('### backend-unit-tests/planning.md')).toBeGreaterThan(prompt.indexOf('### unit-test-planning'));
+  });
+
+  it('tells the model that TESTING.md wins over the skills, only when the repository has one', () => {
+    const withRules = buildPlanPrompt({ skills: [...skills, { name: 'TESTING.md', instructions: 'Test behaviour users rely on.' }], workItems });
+    expect(withRules).toContain('Where it disagrees with a skill, follow TESTING.md.');
+    expect(withRules).toContain('### TESTING.md\n\nTest behaviour users rely on.');
+    expect(buildPlanPrompt({ skills, workItems })).not.toContain('TESTING.md');
+  });
+});
+
+describe('pull request description', () => {
+  it('reaches the writer and the fixer as well as the planner', () => {
+    const pullRequestDescription = 'Titles are now limited to 100 characters on purpose.';
+    const failures = { testFile: 'backend/tests/health.test.ts', failingCases: [], typecheckErrors: [], bannedPatterns: [] };
+    for (const prompt of [
+      buildWritePrompt({ skills, cases: [approved], pullRequestDescription }),
+      buildFixPrompt({ skills, failures, cases: [approved], attempt: 1, maxAttempts: 3, pullRequestDescription }),
+    ]) {
+      expect(prompt).toContain('## Pull request description');
+      expect(prompt).toContain(pullRequestDescription);
+    }
   });
 });
 

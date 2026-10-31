@@ -1,10 +1,11 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadAgentDefinition } from '../src/agents.ts';
 import { loadConfig } from '../src/config.ts';
-import { loadSkill, loadSkillReference, parseSkill } from '../src/skills.ts';
+import { loadSkill, loadSkillReference, loadTestingRules, parseSkill } from '../src/skills.ts';
 import { stageWiring } from '../src/stages.ts';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -15,6 +16,21 @@ describe('repository agent definitions', () => {
     const agents = await Promise.all(files.map((file) => loadAgentDefinition(repositoryRoot, path.basename(file, '.md'))));
     const writers = agents.filter((agent) => agent.tools.includes('Edit') || agent.tools.includes('Write')).map((agent) => agent.name);
     expect(writers.sort()).toEqual(['test-fixer', 'test-writer']);
+  });
+});
+
+describe('loadTestingRules', () => {
+  it("loads the repository's TESTING.md", async () => {
+    expect((await loadTestingRules(repositoryRoot))?.instructions).toMatch(/^# Testing in taskly/);
+  });
+
+  it('returns nothing for a repository without one', async () => {
+    const emptyRoot = await mkdtemp(path.join(tmpdir(), 'testeragent-rules-'));
+    try {
+      expect(await loadTestingRules(emptyRoot)).toBeUndefined();
+    } finally {
+      await rm(emptyRoot, { recursive: true, force: true });
+    }
   });
 });
 

@@ -1,5 +1,5 @@
 import type { WorkItem } from '../analyze/repository.ts';
-import type { Skill } from '../skills.ts';
+import { testingRulesName, type Skill } from '../skills.ts';
 import type { PlannedCase } from './schemas.ts';
 
 const maxFailureMessageLength = 2_000;
@@ -24,10 +24,12 @@ function section(title: string, body: string) {
 }
 
 function skillsSection(skills: Skill[]) {
+  const hasTestingRules = skills.some((skill) => skill.name === testingRulesName);
   return section(
     'Skills',
     [
       'The references this task needs are included below. The other files the skills link to are not needed here.',
+      ...(hasTestingRules ? [`${testingRulesName} holds the repository's own testing rules. Where it disagrees with a skill, follow ${testingRulesName}.`] : []),
       ...skills.map((skill) => `### ${skill.name}\n\n${skill.instructions}`),
     ].join('\n\n'),
   );
@@ -156,12 +158,14 @@ export function buildReviewPrompt({ skills, workItems, cases, approvedCases = []
 type WritePromptOptions = {
   skills: Skill[];
   cases: PlannedCase[];
+  pullRequestDescription?: string;
 };
 
-export function buildWritePrompt({ skills, cases }: WritePromptOptions) {
+export function buildWritePrompt({ skills, cases, pullRequestDescription }: WritePromptOptions) {
   return [
     'Write these approved unit test cases. All paths are relative to your working directory.',
     skillsSection(skills),
+    ...pullRequestSection(pullRequestDescription),
     section('Approved cases', jsonBlock(cases.map(describeCase))),
     section('Output', 'Return every test file you wrote or changed, with the ids of the cases it now contains.'),
   ].join('\n\n');
@@ -173,9 +177,10 @@ type FixPromptOptions = {
   cases: PlannedCase[];
   attempt: number;
   maxAttempts: number;
+  pullRequestDescription?: string;
 };
 
-export function buildFixPrompt({ skills, failures, cases, attempt, maxAttempts }: FixPromptOptions) {
+export function buildFixPrompt({ skills, failures, cases, attempt, maxAttempts, pullRequestDescription }: FixPromptOptions) {
   const typecheckErrors = limitList(failures.typecheckErrors, maxTypecheckErrorsInPrompt);
   const failingCases = limitList(failures.failingCases, maxFailingCasesInPrompt);
   const report = {
@@ -193,6 +198,7 @@ export function buildFixPrompt({ skills, failures, cases, attempt, maxAttempts }
   return [
     `Fix the failing tests in ${failures.testFile}. This is attempt ${attempt} of ${maxAttempts}. All paths are relative to your working directory.`,
     skillsSection(skills),
+    ...pullRequestSection(pullRequestDescription),
     section('The cases this file is meant to contain', jsonBlock(cases.map(describeCase))),
     section('Failures', jsonBlock(report)),
     section('Output', 'Return the test files you changed, and notes on anything you couldn\'t fix or chose not to change.'),
