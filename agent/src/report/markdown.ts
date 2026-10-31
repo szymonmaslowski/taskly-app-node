@@ -117,6 +117,19 @@ function renderWorkspace(workspace: WorkspaceReport) {
     }
   }
   if (workspace.pullRequest && workspace.pullRequest.baseCheck.length > 0) lines.push(...renderBaseCheck(workspace.pullRequest.baseCheck));
+  if (workspace.implReview.length > 0) {
+    lines.push('### Review of the written tests', '');
+    workspace.implReview.forEach((round, index) => {
+      const outcome = round.findings.length === 0 ? 'no findings' : `${round.findings.length} findings${round.revised ? ', blocker and major ones sent back to the writer' : ''}`;
+      lines.push(`Round ${index + 1}: ${outcome}.`, '');
+      if (round.findings.length > 0) {
+        lines.push(
+          list(round.findings, (finding) => `**${finding.severity}** \`${escapeCode(finding.testFile)}\`: ${escapeMarkdown(finding.caseName)}: ${escapeMarkdown(finding.issue)} (${escapeMarkdown(finding.rule)})`),
+          '',
+        );
+      }
+    });
+  }
   if (workspace.flakyCases.length > 0) {
     lines.push(
       '### Flaky cases',

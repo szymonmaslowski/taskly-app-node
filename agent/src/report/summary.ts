@@ -59,6 +59,16 @@ function workspaceSummary(workspace: WorkspaceReport) {
     `Typecheck ${workspace.verify.typecheckPassed ? 'passes' : 'fails'}; ${workspace.verify.testsPassed} tests pass, ${workspace.verify.testsFailed} fail.`,
     `Coverage: statements ${percentage(workspace.coverage.before.statements)} → ${percentage(workspace.coverage.after.statements)}, branches ${percentage(workspace.coverage.before.branches)} → ${percentage(workspace.coverage.after.branches)}.`,
   ];
+  const reviewRounds = workspace.implReview.length;
+  if (reviewRounds > 0) {
+    const revisions = workspace.implReview.filter((round) => round.revised).length;
+    const lastFindings = workspace.implReview[reviewRounds - 1].findings.length;
+    sentences.push(
+      revisions > 0
+        ? `The test review sent the tests back to the writer ${revisions === 1 ? 'once' : `${revisions} times`}.`
+        : `The test review found ${lastFindings === 0 ? 'nothing to change' : `only minor problems (${lastFindings})`}.`,
+    );
+  }
   const baseCheck = workspace.pullRequest?.baseCheck ?? [];
   if (baseCheck.length > 0) {
     const count = (outcome: string) => baseCheck.filter((result) => result.outcome === outcome).length;

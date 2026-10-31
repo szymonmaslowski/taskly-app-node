@@ -24,6 +24,7 @@ const result: WorkspaceResult = {
     write: ['unit-test-principles', 'unit-test-writing', 'backend-unit-tests', 'backend-unit-tests/writing.md'],
     fix: ['unit-test-principles', 'unit-test-writing', 'reading-test-results', 'backend-unit-tests', 'backend-unit-tests/writing.md'],
     lastFix: ['unit-test-principles', 'unit-test-writing', 'reading-test-results', 'backend-unit-tests', 'backend-unit-tests/writing.md'],
+    implReview: ['unit-test-principles', 'unit-test-reviewing', 'unit-test-reviewing/code.md', 'backend-unit-tests', 'backend-unit-tests/reviewing.md'],
   },
   coverageBefore: new Map([['backend/src/api/health.ts', coverage(0, 0)]]),
   coverageAfter: new Map([['backend/src/api/health.ts', coverage(10, 4)]]),
@@ -56,6 +57,7 @@ const result: WorkspaceResult = {
     },
   ],
   changedOutsideCases: [],
+  implReview: [],
   flaky: { cases: [], removedCases: [], revertedCases: [], revertedFiles: [] },
   usages: [usage, { ...usage, costUsd: 0.2 }],
 };
@@ -150,6 +152,15 @@ describe('buildRunReport', () => {
     expect(markdown).toContain('1 fail there, as a test of the change should, 1 pass there too, 1 inconclusive.');
     expect(markdown).toContain('- `backend/tests/health.test.ts`: health keeps the status');
     expect(buildSummary(report)).toContain('On the base code, 1 of the 3 new or changed cases fail, 1 pass and 1 is inconclusive.');
+  });
+
+  it('reports the review of the written tests and whether it sent them back', () => {
+    const finding = { testFile: 'backend/tests/health.test.ts', caseName: 'reports ok', severity: 'major' as const, rule: 'AP4', issue: 'Asserts only the status.', fix: 'Assert the body too.' };
+    const reviewed: WorkspaceResult = { ...result, implReview: [{ findings: [finding], revised: true }] };
+    const report = buildRunReport([reviewed]);
+    expect(renderMarkdownReport(report)).toContain('- **major** `backend/tests/health.test.ts`: reports ok: Asserts only the status. (AP4)');
+    expect(buildSummary(report)).toContain('The test review sent the tests back to the writer once.');
+    expect(report.workspaces[0].skillsUsed).toContain('unit-test-reviewing');
   });
 
   it('reports flaky cases with what the agent did to each', () => {

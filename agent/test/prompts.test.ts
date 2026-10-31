@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt } from '../src/stages/prompts.ts';
+import { buildFixPrompt, buildImplReviewPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt } from '../src/stages/prompts.ts';
 import type { PlannedCase } from '../src/stages/schemas.ts';
 
 const skills = [{ name: 'backend-unit-tests', instructions: 'Use Supertest.' }];
@@ -97,5 +97,20 @@ describe('buildFixPrompt', () => {
     expect(prompt).toContain('"failingCasesOmitted": 40');
     expect(prompt).toContain('"typecheckErrorsOmitted": 60');
     expect(prompt.length).toBeLessThan(100_000);
+  });
+});
+
+describe('buildImplReviewPrompt', () => {
+  it('lists the files to review and adds base-check results only when there are some', () => {
+    const changedTests = [{ testFile: 'backend/tests/health.test.ts', newCases: ['reports ok'], changedCases: [], changedOutsideCases: false }];
+    const withBase = buildImplReviewPrompt({
+      skills,
+      cases: [approved],
+      changedTests,
+      baseCheck: [{ testFile: 'backend/tests/health.test.ts', name: 'reports ok', outcome: 'passes on base' }],
+    });
+    expect(withBase).toContain('## Test files to review');
+    expect(withBase).toContain('"outcome": "passes on base"');
+    expect(buildImplReviewPrompt({ skills, cases: [approved], changedTests, baseCheck: [] })).not.toContain('## Results against the base code');
   });
 });

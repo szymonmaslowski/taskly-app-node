@@ -25,8 +25,8 @@ describe('loadConfig', () => {
 });
 
 const stage = { model: 'claude-sonnet-5-5', effort: 'medium' as const, maxTurns: 10, timeoutMinutes: 5, maxBudgetUsd: 1 };
-const stages = { plan: stage, planReview: stage, write: stage, fix: stage, lastFix: stage };
-const loop = { planRounds: 2, outputAttempts: 2, fixAttempts: 3, agentParallelism: 1, flakyReruns: 2 };
+const stages = { plan: stage, planReview: stage, write: stage, fix: stage, lastFix: stage, implReview: stage };
+const loop = { planRounds: 2, outputAttempts: 2, fixAttempts: 3, agentParallelism: 1, flakyReruns: 2, implReviewRounds: 1 };
 
 describe('configSchema', () => {
   it('fills in defaults for optional settings', () => {

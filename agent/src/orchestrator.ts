@@ -21,8 +21,8 @@ import { applyStagingToRepository, syncStagingToRunner } from './sandbox/sync.ts
 import type { TestCaseResult, TestCaseStatus } from './sandbox/test-results.ts';
 import { loadSkill, loadSkillReference, loadTestingRules, type Skill } from './skills.ts';
 import { applyReview, numberCases, partitionPlannedCases, type CaseDecision } from './stages/plan.ts';
-import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt, type FileFailures } from './stages/prompts.ts';
-import { fixOutputSchema, planOutputSchema, reviewOutputSchema, writeOutputSchema, type PlannedCase } from './stages/schemas.ts';
+import { buildFixPrompt, buildImplReviewPrompt, buildPlanPrompt, buildRevisePrompt, buildReviewPrompt, buildWritePrompt, type ChangedTestFile, type FileFailures } from './stages/prompts.ts';
+import { fixOutputSchema, implReviewOutputSchema, planOutputSchema, reviewOutputSchema, writeOutputSchema, type ImplReviewFinding, type PlannedCase } from './stages/schemas.ts';
 import { stageWiring, type StageName } from './stages.ts';
 import { changesOutsideCases, compareTestFile, findCasesByRuntimeNames, matchFailingCases, removeCases, revertCases, type CaseChange } from './tests/test-changes.ts';
 import { findBannedPatterns, newBannedPatterns } from './tests/test-cases.ts';
@@ -102,6 +102,7 @@ export type WorkspaceResult = {
   testFileChanges: TestFileChanges[];
   changedOutsideCases: ChangeOutsideCases[];
   pullRequest?: PullRequestResult;
+  implReview: ImplReviewRound[];
   flaky: FlakyResult;
   usages: StageUsage[];
 };
@@ -109,6 +110,11 @@ export type WorkspaceResult = {
 export type BrokenTest = {
   testFile: string;
   outcome: 'updated by the agent' | 'passes now' | 'left failing';
+};
+
+export type ImplReviewRound = {
+  findings: ImplReviewFinding[];
+  revised: boolean;
 };
 
 export type FlakyResult = {
@@ -622,6 +628,83 @@ async function processBatch(context: WorkspaceContext, batch: WorkBatch, batchSt
   return { ...result, fixAttempts: fixed.attempts, fixerNotes: fixed.notes, ...cleanup };
 }
 
+async function describeChangedTests(context: WorkspaceContext) {
+  const changedTests: ChangedTestFile[] = [];
+  for (const testFile of await listChangedTestFiles(context)) {
+    const before = await readOriginalFile(context, testFile);
+    const after = await readStagedFile(context, testFile);
+    const changes = compareTestFile(testFile, before, after);
+    const changedTest: ChangedTestFile = {
+      testFile,
+      newCases: changes.filter((change) => change.kind === 'added').map((change) => change.name),
+      changedCases: changes.filter((change) => change.kind === 'modified').map((change) => change.name),
+      changedOutsideCases: before !== undefined && after !== undefined && changesOutsideCases(testFile, before, after),
+    };
+    if (changedTest.newCases.length > 0 || changedTest.changedCases.length > 0 || changedTest.changedOutsideCases) changedTests.push(changedTest);
+  }
+  return changedTests;
+}
+
+async function reviseWrittenTests(context: WorkspaceContext, cases: PlannedCase[], findings: ImplReviewFinding[], round: number): Promise<BatchResult> {
+  const module = `review revision ${round}`;
+  const revisionStart = await readChangedFiles(context);
+  try {
+    context.logger.startStep(`revise · round ${round}`);
+    const written = await runContextStage(context, {
+      stage: 'write',
+      prompt: buildRevisePrompt({ skills: context.skills.write, cases, findings, pullRequestDescription: context.pullRequestDescription }),
+      outputSchema: writeOutputSchema,
+    });
+    await checkStagingChanges(context);
+    context.logger.endStep(`${written.written.length} test files revised`);
+    const failures = await runTouchedTests(context, await selectBatchTestRun(context, revisionStart), 'after revision');
+    const fixed = await fixFailures(context, revisionStart, cases, failures);
+    const cleanup = await cleanUpRemainingFailures(context, revisionStart, fixed.failures);
+    return { ...emptyBatchResult(module), fixAttempts: fixed.attempts, fixerNotes: fixed.notes, ...cleanup };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    context.logger.untrusted(`revision failed: ${reason}`);
+    await restoreBatchStart(context, revisionStart);
+    context.logger.endStep('revision rolled back');
+    return { ...emptyBatchResult(module), error: reason };
+  }
+}
+
+// Severity decides, not the reviewer's mood: blocker and major findings start a revision, minor ones only reach the report.
+async function reviewWrittenTests(context: WorkspaceContext, cases: PlannedCase[]) {
+  const rounds: ImplReviewRound[] = [];
+  const revisions: BatchResult[] = [];
+  for (let round = 1; round <= context.loop.implReviewRounds; round += 1) {
+    const changedTests = await describeChangedTests(context);
+    if (changedTests.length === 0) break;
+    const baseCheck = await checkAgainstBase(context).catch((error: Error) => {
+      context.logger.untrusted(`base check failed: ${error.message}`);
+      return [];
+    });
+    context.logger.startStep(`impl-review · round ${round}`);
+    let findings: ImplReviewFinding[];
+    try {
+      const review = await runContextStage(context, {
+        stage: 'implReview',
+        prompt: buildImplReviewPrompt({ skills: context.skills.implReview, cases, changedTests, baseCheck, pullRequestDescription: context.pullRequestDescription }),
+        outputSchema: implReviewOutputSchema,
+      });
+      findings = review.findings;
+    } catch (error) {
+      context.logger.untrusted(`review failed: ${error instanceof Error ? error.message : String(error)}`);
+      context.logger.endStep('review skipped');
+      break;
+    }
+    for (const finding of findings) context.logger.untrusted(`${finding.severity} ${finding.testFile}: ${finding.caseName}: ${finding.issue}`);
+    const blocking = findings.filter((finding) => finding.severity !== 'minor');
+    context.logger.endStep(`${findings.length} findings, ${blocking.length} blocking`);
+    rounds.push({ findings, revised: blocking.length > 0 });
+    if (blocking.length === 0) break;
+    revisions.push(await reviseWrittenTests(context, cases, blocking, round));
+  }
+  return { rounds, revisions };
+}
+
 async function findChangesOutsideCases(context: WorkspaceContext, modifiedFiles: string[]) {
   const isTestFile = createMatcher(context.workspace.root, context.workspace.tests);
   const isShared = createMatcher(context.workspace.root, context.workspace.shared);
@@ -678,13 +761,15 @@ async function loadStageAgents(trustedRepositoryRoot: string): Promise<StageAgen
     write: await loadStageAgent(trustedRepositoryRoot, 'write'),
     fix: await loadStageAgent(trustedRepositoryRoot, 'fix'),
     lastFix: await loadStageAgent(trustedRepositoryRoot, 'lastFix'),
+    implReview: await loadStageAgent(trustedRepositoryRoot, 'implReview'),
   };
 }
 
 async function loadSkillsForStage(trustedRepositoryRoot: string, stage: StageName, workspaceSkill: string) {
-  const { skills, workspaceReference } = stageWiring[stage];
+  const { skills, references = [], workspaceReference } = stageWiring[stage];
   const loaded = await Promise.all([
     ...skills.map((name) => loadSkill(trustedRepositoryRoot, name)),
+    ...references.map((reference) => loadSkillReference(trustedRepositoryRoot, reference.skill, reference.file)),
     loadSkill(trustedRepositoryRoot, workspaceSkill),
     loadSkillReference(trustedRepositoryRoot, workspaceSkill, workspaceReference),
   ]);
@@ -699,6 +784,7 @@ async function loadStageSkills(trustedRepositoryRoot: string, workspaceSkill: st
     write: await loadSkillsForStage(trustedRepositoryRoot, 'write', workspaceSkill),
     fix: await loadSkillsForStage(trustedRepositoryRoot, 'fix', workspaceSkill),
     lastFix: await loadSkillsForStage(trustedRepositoryRoot, 'lastFix', workspaceSkill),
+    implReview: await loadSkillsForStage(trustedRepositoryRoot, 'implReview', workspaceSkill),
   } satisfies Record<StageName, Skill[]>;
 }
 
@@ -837,6 +923,9 @@ export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, 
         };
         const batchResults: BatchResult[] = [];
         for (const batch of batches) batchResults.push(await processBatchOrRollBack(context, batch));
+        const keptCases = batchResults.flatMap((batch) => batch.decisions.filter((decision) => decision.verdict === 'keep'));
+        const implReview = await reviewWrittenTests(context, keptCases);
+        batchResults.push(...implReview.revisions);
         const flaky = await removeFlakyCases(context);
         await formatChangedFiles(context);
 
@@ -885,6 +974,7 @@ export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, 
             write: context.skills.write.map((skill) => skill.name),
             fix: context.skills.fix.map((skill) => skill.name),
             lastFix: context.skills.lastFix.map((skill) => skill.name),
+            implReview: context.skills.implReview.map((skill) => skill.name),
           },
           coverageBefore: coverage,
           coverageAfter: after.coverage,
@@ -901,6 +991,7 @@ export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, 
             leftOutByCap: pullRequestScope.leftOutByCap,
             deletedSources: pullRequestScope.deletedSources,
           },
+          implReview: implReview.rounds,
           flaky,
           usages: context.usages,
         });

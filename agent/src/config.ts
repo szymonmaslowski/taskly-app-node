@@ -46,6 +46,7 @@ const loopSchema = z.strictObject({
   fixAttempts: z.number().int().min(0).max(loopCaps.fixAttempts),
   agentParallelism: z.number().int().min(1).max(loopCaps.agentParallelism),
   flakyReruns: z.number().int().min(0).max(loopCaps.flakyReruns),
+  implReviewRounds: z.number().int().min(0).max(loopCaps.implReviewRounds),
 });
 
 export const configSchema = z.strictObject({
@@ -63,6 +64,7 @@ export const configSchema = z.strictObject({
     write: stageSchema,
     fix: stageSchema,
     lastFix: stageSchema,
+    implReview: stageSchema,
   }),
   loop: loopSchema,
 });

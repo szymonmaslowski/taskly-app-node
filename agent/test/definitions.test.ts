@@ -40,6 +40,7 @@ describe('stage wiring', () => {
     for (const stage of Object.values(stageWiring)) {
       expect((await loadAgentDefinition(repositoryRoot, stage.agent)).systemPrompt).not.toBe('');
       for (const name of stage.skills) expect((await loadSkill(repositoryRoot, name)).instructions).not.toBe('');
+      for (const reference of stage.references ?? []) expect((await loadSkillReference(repositoryRoot, reference.skill, reference.file)).instructions).not.toBe('');
       for (const workspace of Object.values(config.workspaces)) {
         expect((await loadSkillReference(repositoryRoot, workspace.skill, stage.workspaceReference)).instructions).not.toBe('');
       }

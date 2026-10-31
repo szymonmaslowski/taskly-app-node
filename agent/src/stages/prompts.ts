@@ -1,6 +1,7 @@
 import type { WorkItem } from '../analyze/repository.ts';
 import { testingRulesName, type Skill } from '../skills.ts';
-import type { PlannedCase } from './schemas.ts';
+import type { BaseCheckCase } from '../analyze/base-check.ts';
+import type { ImplReviewFinding, PlannedCase } from './schemas.ts';
 
 const maxFailureMessageLength = 2_000;
 const maxFailingCasesInPrompt = 20;
@@ -202,5 +203,51 @@ export function buildFixPrompt({ skills, failures, cases, attempt, maxAttempts, 
     section('The cases this file is meant to contain', jsonBlock(cases.map(describeCase))),
     section('Failures', jsonBlock(report)),
     section('Output', 'Return the test files you changed, and notes on anything you couldn\'t fix or chose not to change.'),
+  ].join('\n\n');
+}
+
+export type ChangedTestFile = {
+  testFile: string;
+  newCases: string[];
+  changedCases: string[];
+  changedOutsideCases: boolean;
+};
+
+type ImplReviewPromptOptions = {
+  skills: Skill[];
+  cases: PlannedCase[];
+  changedTests: ChangedTestFile[];
+  baseCheck: BaseCheckCase[];
+  pullRequestDescription?: string;
+};
+
+export function buildImplReviewPrompt({ skills, cases, changedTests, baseCheck, pullRequestDescription }: ImplReviewPromptOptions) {
+  const sections = [
+    'Review the unit tests the agent just wrote or changed. They pass. All paths are relative to your working directory.',
+    skillsSection(skills),
+    ...pullRequestSection(pullRequestDescription),
+    section('Test files to review', jsonBlock(changedTests)),
+    section('The plan cases they implement', jsonBlock(cases.map(describeCase))),
+  ];
+  if (baseCheck.length > 0) sections.push(section('Results against the base code', jsonBlock(baseCheck)));
+  sections.push(section('Output', 'List every finding with its test file, case name, severity, rule, issue and fix. Return an empty list when the tests are good.'));
+  return sections.join('\n\n');
+}
+
+type RevisePromptOptions = {
+  skills: Skill[];
+  cases: PlannedCase[];
+  findings: ImplReviewFinding[];
+  pullRequestDescription?: string;
+};
+
+export function buildRevisePrompt({ skills, cases, findings, pullRequestDescription }: RevisePromptOptions) {
+  return [
+    'A reviewer found problems in unit tests you wrote. Fix each finding below in the test files. Don\'t add new cases, and don\'t remove a case unless the finding says it proves nothing. All paths are relative to your working directory.',
+    skillsSection(skills),
+    ...pullRequestSection(pullRequestDescription),
+    section('Findings', jsonBlock(findings)),
+    section('The plan cases the tests implement', jsonBlock(cases.map(describeCase))),
+    section('Output', 'Return every test file you changed, with the ids of the cases it now contains.'),
   ].join('\n\n');
 }

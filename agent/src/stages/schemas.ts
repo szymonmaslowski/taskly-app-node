@@ -34,6 +34,20 @@ export const fixOutputSchema = z.object({
   notes: z.string(),
 });
 
+export const implReviewOutputSchema = z.object({
+  findings: z.array(
+    z.object({
+      testFile: z.string().min(1),
+      caseName: z.string().min(1),
+      severity: z.enum(['blocker', 'major', 'minor']),
+      rule: z.string().min(1),
+      issue: z.string().min(1),
+      fix: z.string().min(1),
+    }),
+  ),
+});
+
+export type ImplReviewFinding = z.output<typeof implReviewOutputSchema>['findings'][number];
 export type PlanOutput = z.output<typeof planOutputSchema>;
 export type ReviewOutput = z.output<typeof reviewOutputSchema>;
 export type PlannedCase = z.output<typeof plannedCaseSchema> & { id: string; sourceFile: string; testFile: string };

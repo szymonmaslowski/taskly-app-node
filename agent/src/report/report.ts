@@ -1,5 +1,5 @@
 import type { CoverageByFile, FileCoverage } from '../analyze/coverage.ts';
-import type { ChangeOutsideCases, FlakyResult, PullRequestResult, RunMode, VerifyResult, WorkspaceResult } from '../orchestrator.ts';
+import type { ChangeOutsideCases, FlakyResult, ImplReviewRound, PullRequestResult, RunMode, VerifyResult, WorkspaceResult } from '../orchestrator.ts';
 import type { StageUsage } from '../run-stage.ts';
 import { matchesCaseName } from '../tests/test-changes.ts';
 
@@ -55,6 +55,7 @@ export type WorkspaceReport = {
   revertedFiles: string[];
   remainingFailures: { testFile: string; cases: string[] }[];
   flakyCases: FlakyCase[];
+  implReview: ImplReviewRound[];
   failedBatches: { module: string; reason: string }[];
   fixerNotes: string[];
 };
@@ -109,8 +110,11 @@ function changedSourceFiles(result: WorkspaceResult) {
 function usedSkills(result: WorkspaceResult) {
   if (result.batches.length === 0) return [];
   const fixerRan = result.batches.some((batch) => batch.fixAttempts > 0);
-  const { plan, planReview, write, fix, lastFix } = result.skillsByStage;
-  const skillNames = [...plan, ...planReview, ...write, ...(fixerRan ? [...fix, ...lastFix] : [])].map((name) => name.split('/')[0]);
+  const { plan, planReview, write, fix, lastFix, implReview } = result.skillsByStage;
+  const reviewRan = result.implReview.length > 0;
+  const skillNames = [...plan, ...planReview, ...write, ...(fixerRan ? [...fix, ...lastFix] : []), ...(reviewRan ? implReview : [])].map(
+    (name) => name.split('/')[0],
+  );
   return [...new Set(skillNames)];
 }
 
@@ -175,6 +179,7 @@ export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {
       batch.remainingFailures.map((failure) => ({ testFile: failure.testFile, cases: failure.failingCases.map((failingCase) => failingCase.fullName) })),
     ),
     flakyCases: describeFlakyCases(result.flaky),
+    implReview: result.implReview,
     failedBatches: batches.flatMap((batch) => (batch.error === undefined ? [] : [{ module: batch.module, reason: batch.error }])),
     fixerNotes: batches.flatMap((batch) => batch.fixerNotes),
   };
