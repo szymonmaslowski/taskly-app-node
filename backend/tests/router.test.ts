@@ -18,6 +18,26 @@ it('lists tasks from the repository', async () => {
   expect(response.body).toEqual([todo]);
   expect(repository.list).toHaveBeenCalledOnce();
 });
+it('returns only tasks due on or before due_before', async () => {
+  const { app, repository } = setup();
+  const early = { ...todo, id: 1, due_date: '2026-10-10' };
+  const boundary = { ...todo, id: 2, due_date: '2026-10-15' };
+  const late = { ...todo, id: 3, due_date: '2026-10-20' };
+  const undated = { ...todo, id: 4, due_date: null };
+  repository.list.mockResolvedValue([early, boundary, late, undated]);
+  const response = await request(app).get('/api/todos?due_before=2026-10-15');
+  expect(response.status).toBe(200);
+  expect(response.body).toEqual([early, boundary]);
+});
+it.each(['2026-02-30', 'tomorrow', '2026-10-15T12:00:00Z'])(
+  'rejects an invalid due_before with 422 without listing: %s', async (value) => {
+    const { app, repository } = setup();
+    const response = await request(app).get('/api/todos').query({ due_before: value });
+    expect(response.status).toBe(422);
+    expect(Array.isArray(response.body.detail)).toBe(true);
+    expect(repository.list).not.toHaveBeenCalled();
+  },
+);
 it('creates tasks with trimmed input and defaults', async () => {
   const { app, repository } = setup();
   const response = await request(app).post('/api/todos').send({ title: '  Plan the sprint  ', priority: 'high' });
