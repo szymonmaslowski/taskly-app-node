@@ -177,4 +177,10 @@ describe('buildSummary', () => {
     expect(summary).toContain('1 batch failed and was rolled back.');
     expect(summary).toContain('no existing test changed');
   });
+
+  it('says so when a pull request changed no source file the agent covers', () => {
+    const report = buildRunReport([], 'pr');
+    expect(buildSummary(report)).toBe('No source files the agent covers changed in this pull request.');
+    expect(renderMarkdownReport({ ...report, summary: buildSummary(report) })).toContain('No source files the agent covers changed in this pull request.');
+  });
 });

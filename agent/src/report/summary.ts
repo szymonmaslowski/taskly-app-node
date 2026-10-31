@@ -61,5 +61,8 @@ function workspaceSummary(workspace: WorkspaceReport) {
 }
 
 export function buildSummary(report: RunReport) {
+  if (report.workspaces.length === 0) {
+    return report.mode === 'pr' ? 'No source files the agent covers changed in this pull request.' : 'No workspace had work to do.';
+  }
   return report.workspaces.map(workspaceSummary).join('\n\n');
 }
