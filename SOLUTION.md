@@ -20,7 +20,7 @@ pull request ──► guard ──────► start ─────► gene
                  a draft       progress"    no write access    head, no secrets    result
 ```
 
-Inside `generate`, a TypeScript orchestrator (`agent/src/orchestrator.ts`) runs one pipeline per changed workspace:
+Inside `generate`, a TypeScript orchestrator (`agent/src/orchestrator.ts`) runs one pipeline per changed workspace. The workspaces run side by side, and within a workspace all batches are planned at once; writing and fixing go one batch at a time.
 
 1. **Analyse** (code, no model). Read the diff, install the head in the runner container, run typecheck, tests and coverage. Pick the changed source files, their related tests, uncovered lines and the existing tests the PR already breaks.
 2. **Plan.** `test-planner` proposes cases, each with the realistic bug it `catches`. The PR description goes in as declared intent.
@@ -62,6 +62,9 @@ Inside `generate`, a TypeScript orchestrator (`agent/src/orchestrator.ts`) runs 
 - **Passing tests aren't trusted on their own.**
   - What: the base check, a separate review of the written tests by Opus, and shuffled reruns. Severity, not the reviewer's verdict, decides whether tests go back to the writer.
   - Why: a test can pass and still prove nothing: it may not notice the change, assert too little, or depend on order. Each check catches a kind of bad test the others miss, and the report shows all three.
+- **Work that only reads runs in parallel.**
+  - What: the backend and the frontend run side by side, each with its own directories, copy of the files and runner. Within a workspace, plan and plan review run for all batches at once. Writing and fixing stay one batch at a time, because they edit the same copy of the files.
+  - Why: run time. The workspaces don't wait for each other, and planning a workspace takes as long as its slowest batch. A run on the #15 diff takes about 280 seconds, with the backend (90 seconds) and the frontend (210 seconds) side by side. Each workspace's log is printed when it finishes, since interleaved lines would break the log groups in GitHub Actions.
 - **Coverage guides planning but isn't a target.**
   - What: uncovered lines go to the planner, and the report shows coverage per file before and after. Every planned case names the bug it catches, and the reviewer drops cases with none.
   - Why: chasing a percentage produces tests that catch nothing. "No new cases" is a valid result.
@@ -141,7 +144,7 @@ Merging #16 into #15 makes #15 green. The next run then finds nothing to add and
 - **"Passes on base" needs a human.** A case that passes on the base code may guard behaviour the PR left alone, which is fine, or miss the change. The report lists those cases; the reviewer judges, nothing removes them.
 - **Minor review findings stay.** Only blocker and major findings go back to the writer; minor ones are listed in the report.
 - **Switching model provider takes work.** Another Claude model is a config change. Another provider means replacing the stage runner ([`agent/src/run-stage.ts`](agent/src/run-stage.ts)), the agent image and the egress allowlist, then checking result quality again. The orchestrator, sandbox, checks, report, skills and agent prompts stay as they are.
-- **One agent session at a time.** Fixers edit the same copy of the files, so `agentParallelism` is 1.
+- **Writing and fixing go one batch at a time.** Writers and fixers edit the same copy of the files, so `agentParallelism` is 1. A later batch's planner also doesn't see the tests an earlier batch writes; batches are per folder, so that rarely matters.
 
 ## For production
 
@@ -149,6 +152,7 @@ Merging #16 into #15 makes #15 green. The next run then finds nothing to add and
 - **Isolation.** The token only in a workflow that runs from the base branch (`workflow_run`), so a PR can't change the workflow that holds it.
 - **Speed.** Images built on push to `main`, pushed to GHCR and pinned by digest. A cheap path that re-verifies without the model when only tests changed. Relevant files inlined into prompts to save the model's read turns.
 - **Better tests.** Mutation testing on changed files.
+- **A fast decision model for the yes/no steps.** Jev/Laya/other system-one model. It can't plan or write tests, but it could answer the yes/no questions around them: whether a changed file needs tests at all, before any Claude session starts, and whether a failure is a bug in the test or in the source, before the fix loop.
 - **A developer loop through PR comments.** Designed, not built:
   - A comment starting with `!testeragent` on the source or the stacked PR starts a run. The comment job checks out no code, checks through the API that the author has write, maintain or admin access, ignores quotes and code blocks, and dispatches the normal workflow with the PR number, so the same guard and sandbox apply.
   - The run collects the permitted directives in order, later ones winning over earlier ones that conflict, such as `!testeragent add a case where due_before is today`. They reach the planner as requests it must plan for; the plan reviewer can't drop them, and the report says what came of each.
