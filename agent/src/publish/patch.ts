@@ -24,7 +24,7 @@ async function runGitOrThrow(repositoryRoot: string, args: string[], input?: str
   return result.stdout;
 }
 
-async function listChangedPaths(repositoryRoot: string) {
+export async function listChangedPaths(repositoryRoot: string) {
   const fields = (await runGitOrThrow(repositoryRoot, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])).split('\0');
   const paths: string[] = [];
   for (let index = 0; index < fields.length; index += 1) {
