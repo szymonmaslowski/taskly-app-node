@@ -1,22 +1,26 @@
 import { Input, Select } from '../../../design-system'
-import type { Filter, Sort } from '../types'
+import type { DueFilter, Filter, Sort } from '../types'
 
 interface TodoFiltersProps {
   filter: Filter
   search: string
   sort: Sort
+  due: DueFilter
   onFilterChange: (filter: Filter) => void
   onSearchChange: (search: string) => void
   onSortChange: (sort: Sort) => void
+  onDueChange: (due: DueFilter) => void
 }
 
 export function TodoFilters({
   filter,
   search,
   sort,
+  due,
   onFilterChange,
   onSearchChange,
   onSortChange,
+  onDueChange,
 }: TodoFiltersProps) {
   return (
     <section className="filters-layout" aria-label="Task filters">
@@ -34,6 +38,17 @@ export function TodoFilters({
           { value: 'all', label: 'All statuses' },
           { value: 'active', label: 'To do' },
           { value: 'completed', label: 'Completed' },
+        ]}
+      />
+      <Select
+        label="Due"
+        value={due}
+        onChange={(event) => onDueChange(event.target.value as DueFilter)}
+        options={[
+          { value: 'any', label: 'Any time' },
+          { value: 'overdue', label: 'Overdue' },
+          { value: 'today', label: 'Due today' },
+          { value: 'week', label: 'Due this week' },
         ]}
       />
       <Select

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { TodoStore } from './types.ts';
-import { createSchema, updateSchema, idSchema } from './validators.ts';
+import { dueOnOrBefore } from './filters.ts';
+import { createSchema, updateSchema, idSchema, listQuerySchema } from './validators.ts';
 
 export function createTodosRouter(repository: TodoStore) {
   const router = Router();
@@ -10,7 +11,12 @@ export function createTodosRouter(repository: TodoStore) {
     res.locals.todoId = result.data;
     next();
   });
-  router.get('/', async (req, res) => res.json(await repository.list()));
+  router.get('/', async (req, res) => {
+    const query = listQuerySchema.safeParse(req.query);
+    if (!query.success) return res.status(422).json({ detail: query.error.issues });
+    const todos = await repository.list();
+    res.json(query.data.due_before ? dueOnOrBefore(todos, query.data.due_before) : todos);
+  });
   router.post('/', async (req, res) => {
     const result = createSchema.safeParse(req.body);
     if (!result.success) return res.status(422).json({ detail: result.error.issues });

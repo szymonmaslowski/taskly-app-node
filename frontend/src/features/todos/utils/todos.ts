@@ -1,4 +1,4 @@
-import type { Filter, Sort, Todo, TodoInput } from '../types'
+import type { DueFilter, Filter, Sort, Todo, TodoInput } from '../types'
 
 export const priorityLabels = { low: 'Low', medium: 'Medium', high: 'High' }
 const priorityOrder = { high: 0, medium: 1, low: 2 }
@@ -6,8 +6,8 @@ const priorityOrder = { high: 0, medium: 1, low: 2 }
 export function validateTodo(input: TodoInput): Record<string, string> {
   const errors: Record<string, string> = {}
   if (!input.title.trim()) errors.title = 'Enter a task title.'
-  else if (input.title.trim().length > 120)
-    errors.title = 'The title must be at most 120 characters.'
+  else if (input.title.trim().length > 100)
+    errors.title = 'The title must be at most 100 characters.'
   if (input.description.trim().length > 2000)
     errors.description = 'The description must be at most 2000 characters.'
   if (input.due_date) {
@@ -23,11 +23,27 @@ export function validateTodo(input: TodoInput): Record<string, string> {
   return errors
 }
 
+function toLocalDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+export function matchesDue(todo: Todo, due: DueFilter, now: Date = new Date()) {
+  if (due === 'any') return true
+  if (!todo.due_date || todo.completed) return false
+  const today = toLocalDate(now)
+  if (due === 'overdue') return todo.due_date < today
+  if (due === 'today') return todo.due_date === today
+  const weekEnd = new Date(now)
+  weekEnd.setDate(weekEnd.getDate() + 6)
+  return todo.due_date >= today && todo.due_date <= toLocalDate(weekEnd)
+}
+
 export function selectTodos(
   todos: Todo[],
   filter: Filter,
   query: string,
   sort: Sort,
+  due: DueFilter = 'any',
 ): Todo[] {
   const search = query.trim().toLocaleLowerCase('en')
   return todos
@@ -37,6 +53,7 @@ export function selectTodos(
         (filter === 'completed' ? todo.completed : !todo.completed)
       return (
         statusMatches &&
+        matchesDue(todo, due) &&
         `${todo.title} ${todo.description}`
           .toLocaleLowerCase('en')
           .includes(search)
