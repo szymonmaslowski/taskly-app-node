@@ -11,6 +11,7 @@ export type WorkItem = {
   sourceFile: string;
   testFiles: string[];
   coverage?: FileCoverage;
+  failingTests?: string[];
 };
 
 export type WorkBatch = {
@@ -56,7 +57,7 @@ export function selectSourceFiles(workspace: WorkspaceConfig, trackedFiles: stri
   return trackedFiles.filter((relativePath) => isSource(relativePath) && !isIgnored(relativePath) && !isTest(relativePath));
 }
 
-function groupIntoBatches(workspaceName: string, items: WorkItem[], maxBatchSize: number) {
+export function groupIntoBatches(workspaceName: string, items: WorkItem[], maxBatchSize: number) {
   const itemsByModule = new Map<string, WorkItem[]>();
   for (const item of items) {
     const module = path.posix.dirname(item.sourceFile);
