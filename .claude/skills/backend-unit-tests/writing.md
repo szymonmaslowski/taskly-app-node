@@ -7,7 +7,7 @@ Use with the `unit-test-writing` skill. Each pattern below is taken from an exis
 Call the function and assert on the result. For rejections, a table with `safeParse`:
 
 ```ts
-it.each([{ title: '' }, { title: 'x'.repeat(121) }, { title: 'Task', due_date: '2025-02-29' }])(
+it.each([{ title: '' }, { title: '  ' }, { title: 'Task', due_date: '2025-02-29' }])(
   'rejects invalid create input: %j', (input) => expect(createSchema.safeParse(input).success).toBe(false));
 ```
 

@@ -4,7 +4,7 @@ Use with the `unit-test-planning` skill. Describe behaviour as the user sees it,
 
 ## Pure utilities (`features/todos/utils/todos.ts`)
 
-- Validation: each message, at the limit and one past it (title 120/121, description 2000/2001 after trimming), invalid calendar dates such as `2026-02-30`, an empty due date being allowed.
+- Validation: each message, at the limit and one past it for the title and description limits the source defines (after trimming), invalid calendar dates such as `2026-02-30`, an empty due date being allowed.
 - Filtering and sorting: each filter value, search across title and description ignoring case, each sort order with its tie-breaker.
 - Date logic that reads the clock (`isOverdue`): yesterday, today and tomorrow against a fixed system time; completed and undated tasks.
 - Formatting: one representative value per format.

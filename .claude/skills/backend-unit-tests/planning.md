@@ -6,7 +6,7 @@ Use with the `unit-test-planning` skill. The contract decides the expected behav
 
 Pure Zod schemas. Every rule has two sides; plan both.
 
-- Lengths at the limit and one past it: title 1 and 120 against empty, whitespace only and 121; description 2000 against 2001. Trimming happens before the length check.
+- Lengths at the limit and one past it, for the limits the contract and the schema define: title at its minimum and maximum against empty, whitespace only and one past the maximum; description at its maximum against one past it. Trimming happens before the length check.
 - Enums: every allowed `priority`, one value outside.
 - Dates: calendar validity, not format only. `2024-02-29` passes, `2025-02-29` and `2026-02-30` fail, a datetime string fails.
 - Defaults on create; `null` against absent on update; strict objects reject unknown keys; an empty update body fails with its own message.
