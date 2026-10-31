@@ -32,7 +32,7 @@ describe('configSchema', () => {
   it('fills in defaults for optional settings', () => {
     const config = configSchema.parse({ workspaces: { backend: workspace() }, stages, loop });
     expect(config.flakyReruns).toBe(2);
-    expect(config.limits).toEqual({ maxChangedSourceFiles: 15, maxChangedLines: 1500 });
+    expect(config.limits).toEqual({ maxChangedSourceFiles: 15 });
     expect(config.workspaces.backend).toMatchObject({ ignoredSources: [], shared: [], context: [] });
   });
 

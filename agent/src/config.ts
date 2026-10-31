@@ -55,7 +55,6 @@ export const configSchema = z.strictObject({
   limits: z
     .strictObject({
       maxChangedSourceFiles: z.number().int().positive().default(15),
-      maxChangedLines: z.number().int().positive().default(1500),
     })
     .prefault({}),
   stages: z.strictObject({
