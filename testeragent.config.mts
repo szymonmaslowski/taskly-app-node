@@ -62,6 +62,8 @@ export default defineConfig({
     fixAttempts: 3,
     // Fixers share one writable staging copy, so two of them could edit the same fixture at once.
     agentParallelism: 1,
+    // Planning only reads files, so batches can be planned at once.
+    planParallelism: 4,
     // Extra shuffled runs of the changed test files; a case that both passes and fails across them is flaky.
     flakyReruns: 2,
     // Reviews of the written tests; blocker and major findings send the tests back to the writer, the tests and the fixer. 0 turns the review off.

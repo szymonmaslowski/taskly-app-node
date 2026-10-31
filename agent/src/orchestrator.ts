@@ -595,8 +595,9 @@ function emptyBatchResult(module: string): BatchResult {
   };
 }
 
-async function processBatch(context: WorkspaceContext, batch: WorkBatch, batchStart: BatchSnapshot): Promise<BatchResult> {
-  const planned = await planBatch(context, batch);
+type PlannedBatch = Awaited<ReturnType<typeof planBatch>>;
+
+async function processBatch(context: WorkspaceContext, batch: WorkBatch, planned: PlannedBatch, batchStart: BatchSnapshot): Promise<BatchResult> {
   const keptCases = planned.decisions.filter((decision) => decision.verdict === 'keep');
   const result: BatchResult = {
     module: batch.module,
@@ -730,10 +731,10 @@ async function restoreBatchStart(context: WorkspaceContext, batchStart: BatchSna
 }
 
 // One failing batch must not lose the work of the others, so its files go back to where the batch started and the run carries on.
-async function processBatchOrRollBack(context: WorkspaceContext, batch: WorkBatch) {
+async function processBatchOrRollBack(context: WorkspaceContext, batch: WorkBatch, planned: PlannedBatch) {
   const batchStart = await readChangedFiles(context);
   try {
-    return await processBatch(context, batch, batchStart);
+    return await processBatch(context, batch, planned, batchStart);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     context.logger.untrusted(`batch ${batch.module} failed: ${reason}`);
@@ -741,6 +742,23 @@ async function processBatchOrRollBack(context: WorkspaceContext, batch: WorkBatc
     context.logger.endStep('batch rolled back');
     return { ...emptyBatchResult(batch.module), error: reason };
   }
+}
+
+// Planning only reads, so every batch is planned at once, each with its own log that is printed when it finishes.
+// A failed plan becomes a failed batch, like a failure later in the batch.
+async function planBatches(context: WorkspaceContext, batches: WorkBatch[]) {
+  return mapWithConcurrency(batches, context.loop.planParallelism, async (batch) => {
+    const buffered = createBufferedLogger();
+    try {
+      return { planned: await planBatch({ ...context, logger: buffered.logger }, batch) };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      buffered.logger.untrusted(`planning ${batch.module} failed: ${reason}`);
+      return { error: reason };
+    } finally {
+      buffered.flush(context.logger);
+    }
+  });
 }
 
 const writingStages = new Set<StageName>(['write', 'fix', 'lastFix']);
@@ -930,7 +948,11 @@ async function runWorkspace({
       usages: [],
     };
     const batchResults: BatchResult[] = [];
-    for (const batch of batches) batchResults.push(await processBatchOrRollBack(context, batch));
+    const plans = await planBatches(context, batches);
+    for (const [index, batch] of batches.entries()) {
+      const plan = plans[index];
+      batchResults.push(plan.planned ? await processBatchOrRollBack(context, batch, plan.planned) : { ...emptyBatchResult(batch.module), error: plan.error });
+    }
     const keptCases = batchResults.flatMap((batch) => batch.decisions.filter((decision) => decision.verdict === 'keep'));
     const implReview = await reviewWrittenTests(context, keptCases);
     batchResults.push(...implReview.revisions);

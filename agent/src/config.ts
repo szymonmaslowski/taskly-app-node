@@ -45,6 +45,7 @@ const loopSchema = z.strictObject({
   outputAttempts: z.number().int().min(1).max(loopCaps.outputAttempts),
   fixAttempts: z.number().int().min(0).max(loopCaps.fixAttempts),
   agentParallelism: z.number().int().min(1).max(loopCaps.agentParallelism),
+  planParallelism: z.number().int().min(1).max(loopCaps.planParallelism),
   flakyReruns: z.number().int().min(0).max(loopCaps.flakyReruns),
   implReviewRounds: z.number().int().min(0).max(loopCaps.implReviewRounds),
 });
