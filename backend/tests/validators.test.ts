@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createSchema, updateSchema, idSchema, todoSchema } from '../src/features/todos/validators.ts';
+import { createSchema, updateSchema, idSchema, todoSchema, listQuerySchema } from '../src/features/todos/validators.ts';
 import { todo } from './fixture.ts';
 
 describe('todo validation', () => {
@@ -9,19 +9,33 @@ describe('todo validation', () => {
     });
   });
   it('accepts every input field and boundary lengths', () => {
-    const input = { title: 'x'.repeat(120), description: 'x'.repeat(2000), priority: 'low', due_date: '2024-02-29', completed: true };
+    const input = { title: 'x'.repeat(100), description: 'x'.repeat(2000), priority: 'low', due_date: '2024-02-29', completed: true };
     expect(createSchema.parse(input)).toEqual(input);
+    expect(createSchema.safeParse({ ...input, title: 'x'.repeat(101) }).success).toBe(false);
     expect(updateSchema.parse({ description: '  Details  ', title: '  Task  ', priority: 'high', completed: false, due_date: null }))
       .toEqual({ description: 'Details', title: 'Task', priority: 'high', completed: false, due_date: null });
     expect(updateSchema.parse({ due_date: '2026-10-15' })).toEqual({ due_date: '2026-10-15' });
   });
   it.each([
-    {}, { title: '' }, { title: '  ' }, { title: 'x'.repeat(121) },
+    {}, { title: '' }, { title: '  ' }, { title: 'x'.repeat(101) },
     { title: 'Task', description: 'x'.repeat(2001) }, { title: 'Task', priority: 'urgent' },
     { title: 'Task', due_date: '2026-02-30' }, { title: 'Task', due_date: '2025-02-29' },
     { title: 'Task', due_date: '2026-10-15T12:00:00Z' }, { title: 'Task', completed: 'true' },
     { title: 'Task', completed: 1 }, { title: 'Task', id: 1 }, { title: null },
   ])('rejects invalid create input: %j', (input) => expect(createSchema.safeParse(input).success).toBe(false));
+  it('trims a title before checking the length limit', () => {
+    expect(createSchema.parse({ title: '  ' + 'x'.repeat(100) + '  ' })).toEqual({
+      title: 'x'.repeat(100), description: '', priority: 'medium', due_date: null, completed: false,
+    });
+  });
+  it('listQuerySchema accepts a valid or absent due_before and rejects bad ones', () => {
+    expect(listQuerySchema.parse({})).toEqual({});
+    expect(listQuerySchema.parse({ due_before: '2024-02-29' })).toEqual({ due_before: '2024-02-29' });
+    expect(listQuerySchema.safeParse({ due_before: '2025-02-29' }).success).toBe(false);
+    expect(listQuerySchema.safeParse({ due_before: '2026-10-15T12:00:00Z' }).success).toBe(false);
+    expect(listQuerySchema.safeParse({ due_before: 'soon' }).success).toBe(false);
+    expect(listQuerySchema.safeParse({ other: 'x' }).success).toBe(false);
+  });
   it('rejects empty patches', () => {
     expect(() => updateSchema.parse({})).toThrow('Provide at least one field');
   });

@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { todoFixture } from '../../../test/todoFixture'
 import type { Todo } from '../types'
 import { useTodoFilters } from './useTodoFilters'
@@ -27,6 +27,10 @@ function setup(todos: Todo[] = [active, completed]) {
 }
 
 describe('useTodoFilters', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('starts with all filter, empty search, newest sort and every todo visible', () => {
     const { result } = setup()
 
@@ -34,6 +38,50 @@ describe('useTodoFilters', () => {
     expect(result.current.search).toBe('')
     expect(result.current.sort).toBe('newest')
     expect(result.current.visible).toEqual([completed, active])
+  })
+
+  it('starts with the any-time due filter and keeps undated and dated todos visible', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 9, 31, 12, 0, 0))
+    const dated: Todo = {
+      ...active,
+      id: 3,
+      due_date: '2026-10-01',
+      created_at: '2026-10-03T12:00:00Z',
+    }
+
+    const { result } = setup([active, dated])
+
+    expect(result.current.due).toBe('any')
+    expect(result.current.visible).toEqual([dated, active])
+  })
+
+  it('narrows to overdue todos when the due filter changes', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 9, 31, 12, 0, 0))
+    const overdue: Todo = {
+      ...active,
+      id: 3,
+      due_date: '2026-10-01',
+      created_at: '2026-10-03T12:00:00Z',
+    }
+    const future: Todo = {
+      ...active,
+      id: 4,
+      due_date: '2026-11-15',
+      created_at: '2026-10-04T12:00:00Z',
+    }
+    const completedOverdue: Todo = {
+      ...completed,
+      id: 5,
+      due_date: '2026-10-01',
+    }
+    const { result } = setup([overdue, future, active, completedOverdue])
+
+    act(() => result.current.setDue('overdue'))
+
+    expect(result.current.due).toBe('overdue')
+    expect(result.current.visible).toEqual([overdue])
   })
 
   it('narrows to completed todos when the filter changes', () => {

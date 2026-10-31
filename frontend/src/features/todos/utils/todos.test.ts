@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatDate, isOverdue, selectTodos, validateTodo } from './todos'
+import {
+  formatDate,
+  isOverdue,
+  matchesDue,
+  selectTodos,
+  validateTodo,
+} from './todos'
 import type { Todo, TodoInput } from '../types'
 
 const base: Todo = {
@@ -106,13 +112,13 @@ describe('validateTodo', () => {
     })
   })
 
-  it('accepts a title of 120 characters and rejects 121', () => {
-    expect(validateTodo({ ...valid, title: 'a'.repeat(120) })).toEqual({})
-    expect(validateTodo({ ...valid, title: `  ${'a'.repeat(120)}  ` })).toEqual(
+  it('accepts a title of 100 characters and rejects 101', () => {
+    expect(validateTodo({ ...valid, title: 'a'.repeat(100) })).toEqual({})
+    expect(validateTodo({ ...valid, title: `  ${'a'.repeat(100)}  ` })).toEqual(
       {},
     )
-    expect(validateTodo({ ...valid, title: 'a'.repeat(121) })).toEqual({
-      title: 'The title must be at most 120 characters.',
+    expect(validateTodo({ ...valid, title: 'a'.repeat(101) })).toEqual({
+      title: 'The title must be at most 100 characters.',
     })
   })
 
@@ -195,6 +201,90 @@ describe('isOverdue', () => {
 
     expect(isOverdue({ ...base, due_date: '2026-03-04' })).toBe(true)
     expect(isOverdue({ ...base, due_date: '2026-03-05' })).toBe(false)
+  })
+})
+
+describe('matchesDue', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function setNow(year: number, month: number, day: number, hour: number) {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(year, month, day, hour, 0, 0))
+  }
+
+  it.each(['overdue', 'today', 'week'] as const)(
+    'excludes completed and undated tasks for the %s filter',
+    (due) => {
+      setNow(2026, 9, 30, 12)
+
+      expect(
+        matchesDue({ ...base, completed: true, due_date: '2026-10-29' }, due),
+      ).toBe(false)
+      expect(
+        matchesDue({ ...base, completed: true, due_date: '2026-10-30' }, due),
+      ).toBe(false)
+      expect(
+        matchesDue({ ...base, completed: true, due_date: '2026-11-01' }, due),
+      ).toBe(false)
+      expect(matchesDue({ ...base, due_date: null }, due)).toBe(false)
+    },
+  )
+
+  it('overdue matches only dates before today', () => {
+    setNow(2026, 9, 30, 12)
+
+    expect(matchesDue({ ...base, due_date: '2026-10-29' }, 'overdue')).toBe(
+      true,
+    )
+    expect(matchesDue({ ...base, due_date: '2026-10-30' }, 'overdue')).toBe(
+      false,
+    )
+    expect(matchesDue({ ...base, due_date: '2026-10-31' }, 'overdue')).toBe(
+      false,
+    )
+  })
+
+  it('today matches only the current local date', () => {
+    setNow(2026, 2, 5, 10)
+
+    expect(matchesDue({ ...base, due_date: '2026-03-05' }, 'today')).toBe(true)
+    expect(matchesDue({ ...base, due_date: '2026-03-04' }, 'today')).toBe(false)
+    expect(matchesDue({ ...base, due_date: '2026-03-06' }, 'today')).toBe(false)
+  })
+
+  it('week includes today through six days ahead and excludes both sides outside', () => {
+    setNow(2026, 9, 28, 12)
+
+    expect(matchesDue({ ...base, due_date: '2026-10-28' }, 'week')).toBe(true)
+    expect(matchesDue({ ...base, due_date: '2026-11-03' }, 'week')).toBe(true)
+    expect(matchesDue({ ...base, due_date: '2026-10-27' }, 'week')).toBe(false)
+    expect(matchesDue({ ...base, due_date: '2026-11-04' }, 'week')).toBe(false)
+  })
+})
+
+describe('selectTodos with a due filter', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('combines the due filter with status and search, using the current date', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 9, 30, 12, 0, 0))
+    const match = { ...base, id: 1, title: 'Report', due_date: '2026-10-29' }
+    const completed = { ...match, id: 2, completed: true }
+    const otherTitle = { ...match, id: 3, title: 'Groceries' }
+    const future = { ...match, id: 4, due_date: '2026-11-15' }
+    const todos = [match, completed, otherTitle, future]
+
+    expect(selectTodos(todos, 'active', 'report', 'newest', 'overdue')).toEqual(
+      [match],
+    )
+    expect(selectTodos(todos, 'active', 'report', 'newest')).toEqual([
+      future,
+      match,
+    ])
   })
 })
 

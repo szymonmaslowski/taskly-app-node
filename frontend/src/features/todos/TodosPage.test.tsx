@@ -49,6 +49,8 @@ vi.mock('./components/TodoFilters', () => ({
       <span>{`filter:${props.filter}`}</span>
       <span>{`search:${props.search}`}</span>
       <span>{`sort:${props.sort}`}</span>
+      <span>{`due:${props.due}`}</span>
+      <button onClick={() => props.onDueChange('week')}>Change due</button>
       <button onClick={() => props.onFilterChange('completed')}>
         Change filter
       </button>
@@ -131,10 +133,12 @@ function setup(options: SetupOptions = {}) {
     filter: 'all',
     search: '',
     sort: 'newest',
+    due: 'any',
     visible: options.visible ?? [],
     setFilter: vi.fn(),
     setSearch: vi.fn(),
     setSort: vi.fn(),
+    setDue: vi.fn(),
     ...options.filters,
   }
   vi.mocked(useTodosQuery).mockReturnValue(
@@ -445,6 +449,26 @@ it('passes filter, search and sort to the filters and forwards each change callb
   expect(setSearch).toHaveBeenCalledTimes(1)
 })
 
+it('passes the due filter to the filters and forwards its change callback to setDue', async () => {
+  const setFilter = vi.fn()
+  const setSearch = vi.fn()
+  const setSort = vi.fn()
+  const setDue = vi.fn()
+  const { user } = setup({
+    filters: { due: 'overdue', setFilter, setSearch, setSort, setDue },
+  })
+  render(<TodosPage />)
+  expect(screen.getByText('due:overdue')).toBeVisible()
+
+  await user.click(screen.getByRole('button', { name: 'Change due' }))
+
+  expect(setDue).toHaveBeenCalledTimes(1)
+  expect(setDue).toHaveBeenCalledWith('week')
+  expect(setFilter).not.toHaveBeenCalled()
+  expect(setSearch).not.toHaveBeenCalled()
+  expect(setSort).not.toHaveBeenCalled()
+})
+
 it('passes the notice message from useNotice to SuccessNotice', () => {
   setup({ message: 'Task created.' })
 
@@ -479,10 +503,12 @@ it('displays a query failure and resets mutation errors before retrying', async 
     filter: 'all',
     search: '',
     sort: 'newest',
+    due: 'any',
     visible: [],
     setFilter: vi.fn(),
     setSearch: vi.fn(),
     setSort: vi.fn(),
+    setDue: vi.fn(),
   })
   render(<TodosPage />)
   expect(screen.getByTestId('alert')).toHaveTextContent(
