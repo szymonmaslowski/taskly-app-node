@@ -183,9 +183,7 @@ it('ignores a submit while busy', async () => {
     create: idleMutation({ mutateAsync: create }),
     update: idleMutation({ mutateAsync: update }),
   })
-  render(
-    <TodoEditor todo="new" busy onClose={onClose} onSaved={onSaved} />,
-  )
+  render(<TodoEditor todo="new" busy onClose={onClose} onSaved={onSaved} />)
   expect(screen.getByText('Busy: true')).toBeVisible()
   await user.click(screen.getByRole('button', { name: 'Submit form' }))
   expect(create).not.toHaveBeenCalled()

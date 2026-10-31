@@ -90,7 +90,9 @@ vi.mock('./components/TodoEditor', () => ({
       <span>{`editor-todo:${JSON.stringify(props.todo)}`}</span>
       <span>{`editor-busy:${props.busy}`}</span>
       <button onClick={props.onClose}>Close editor</button>
-      <button onClick={() => props.onSaved('Task created.')}>Save editor</button>
+      <button onClick={() => props.onSaved('Task created.')}>
+        Save editor
+      </button>
     </div>
   ),
 }))
@@ -314,30 +316,26 @@ it.each([
 
     render(<TodosPage />)
 
-    expect(screen.getByRole('button', { name: 'Header create' })).toHaveProperty(
-      'disabled',
-      disabled,
-    )
+    expect(
+      screen.getByRole('button', { name: 'Header create' }),
+    ).toHaveProperty('disabled', disabled)
   },
 )
 
 it.each([
   { button: 'Header create', busy: false },
   { button: 'List create', busy: true },
-])(
-  'opens the editor for a new task from $button',
-  async ({ button, busy }) => {
-    const { user } = setup({ busy })
-    render(<TodosPage />)
-    expect(screen.queryByRole('dialog', { name: 'Editor' })).toBeNull()
+])('opens the editor for a new task from $button', async ({ button, busy }) => {
+  const { user } = setup({ busy })
+  render(<TodosPage />)
+  expect(screen.queryByRole('dialog', { name: 'Editor' })).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: button }))
+  await user.click(screen.getByRole('button', { name: button }))
 
-    expect(screen.getByRole('dialog', { name: 'Editor' })).toBeVisible()
-    expect(screen.getByText('editor-todo:"new"')).toBeVisible()
-    expect(screen.getByText(`editor-busy:${busy}`)).toBeVisible()
-  },
-)
+  expect(screen.getByRole('dialog', { name: 'Editor' })).toBeVisible()
+  expect(screen.getByText('editor-todo:"new"')).toBeVisible()
+  expect(screen.getByText(`editor-busy:${busy}`)).toBeVisible()
+})
 
 it('opens the editor with the selected task when editing', async () => {
   const { user } = setup({ visible: [todoFixture] })

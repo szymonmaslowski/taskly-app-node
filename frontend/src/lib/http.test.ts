@@ -58,7 +58,9 @@ it('resolves undefined on 204 without reading the body', async () => {
     .mockRejectedValue(new SyntaxError('Unexpected end of JSON input'))
   fetchMock.mockResolvedValue(response)
 
-  await expect(request('/todos/1', { method: 'DELETE' })).resolves.toBeUndefined()
+  await expect(
+    request('/todos/1', { method: 'DELETE' }),
+  ).resolves.toBeUndefined()
   expect(json).not.toHaveBeenCalled()
 })
 
@@ -71,12 +73,15 @@ it('throws the connection message when fetch fails', async () => {
 it('rethrows the original error when the request was aborted', async () => {
   const controller = new AbortController()
   controller.abort()
-  const abortError = new DOMException('The operation was aborted.', 'AbortError')
+  const abortError = new DOMException(
+    'The operation was aborted.',
+    'AbortError',
+  )
   fetchMock.mockRejectedValue(abortError)
 
-  await expect(
-    request('/todos', { signal: controller.signal }),
-  ).rejects.toBe(abortError)
+  await expect(request('/todos', { signal: controller.signal })).rejects.toBe(
+    abortError,
+  )
 })
 
 it('throws the connection message when fetch fails with a signal that is not aborted', async () => {

@@ -10,7 +10,12 @@ import { useTodosBusy } from './useTodosBusy'
 import { useUpdateTodoMutation } from './useUpdateTodoMutation'
 
 vi.mock('../api/todos', () => ({
-  todosApi: { list: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
+  todosApi: {
+    list: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    remove: vi.fn(),
+  },
 }))
 
 function createClient() {
@@ -77,7 +82,11 @@ describe('useUpdateTodoMutation', () => {
       resolveStale = resolve
     })
     const inFlight = client
-      .fetchQuery({ queryKey: todoKeys.list, queryFn: () => stale, staleTime: 0 })
+      .fetchQuery({
+        queryKey: todoKeys.list,
+        queryFn: () => stale,
+        staleTime: 0,
+      })
       .catch(() => undefined)
 
     await act(async () => {

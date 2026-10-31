@@ -8,7 +8,9 @@ vi.mock('../../../design-system', () => import('../../../design-system/mocks'))
 it('invites to add a first task and calls onCreate when there are no tasks', async () => {
   const user = userEvent.setup()
   const onCreate = vi.fn()
-  render(<TodoEmptyState hasTodos={false} disabled={false} onCreate={onCreate} />)
+  render(
+    <TodoEmptyState hasTodos={false} disabled={false} onCreate={onCreate} />,
+  )
   expect(
     screen.getByRole('heading', { name: 'Add your first task' }),
   ).toBeVisible()
@@ -31,7 +33,9 @@ it('disables the create button when disabled', async () => {
 
 it('explains that filters match nothing and offers no create button when tasks exist', () => {
   render(<TodoEmptyState hasTodos disabled={false} onCreate={vi.fn()} />)
-  expect(screen.getByRole('heading', { name: 'No matching tasks' })).toBeVisible()
+  expect(
+    screen.getByRole('heading', { name: 'No matching tasks' }),
+  ).toBeVisible()
   expect(
     screen.getByText('Change the status filter or search to find your tasks.'),
   ).toBeVisible()

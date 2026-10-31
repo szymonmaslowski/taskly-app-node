@@ -11,10 +11,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function renderItem(
-  todo: Todo = todoFixture,
-  props: { busy?: boolean } = {},
-) {
+function renderItem(todo: Todo = todoFixture, props: { busy?: boolean } = {}) {
   const handlers = { onEdit: vi.fn(), onToggle: vi.fn(), onDelete: vi.fn() }
   const view = render(
     <TodoItem todo={todo} busy={props.busy ?? false} {...handlers} />,
@@ -114,7 +111,9 @@ it('disables toggle, edit and delete while busy', async () => {
     busy: true,
   })
   const checkbox = screen.getByRole('checkbox')
-  const edit = screen.getByRole('button', { name: `Edit: ${todoFixture.title}` })
+  const edit = screen.getByRole('button', {
+    name: `Edit: ${todoFixture.title}`,
+  })
   const remove = screen.getByRole('button', {
     name: `Delete: ${todoFixture.title}`,
   })

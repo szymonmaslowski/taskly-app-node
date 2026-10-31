@@ -77,7 +77,12 @@ describe('selectTodos', () => {
     const octoberHigh = { ...base, id: 4, due_date: '2026-10-05' }
 
     expect(
-      selectTodos([november, undated, octoberLow, octoberHigh], 'all', '', 'due'),
+      selectTodos(
+        [november, undated, octoberLow, octoberHigh],
+        'all',
+        '',
+        'due',
+      ),
     ).toEqual([octoberHigh, octoberLow, november, undated])
   })
 })
@@ -112,15 +117,13 @@ describe('validateTodo', () => {
   })
 
   it('accepts a description of 2000 characters and rejects 2001 after trimming', () => {
-    expect(
-      validateTodo({ ...valid, description: 'a'.repeat(2000) }),
-    ).toEqual({})
+    expect(validateTodo({ ...valid, description: 'a'.repeat(2000) })).toEqual(
+      {},
+    )
     expect(
       validateTodo({ ...valid, description: ` ${'a'.repeat(2000)} ` }),
     ).toEqual({})
-    expect(
-      validateTodo({ ...valid, description: 'a'.repeat(2001) }),
-    ).toEqual({
+    expect(validateTodo({ ...valid, description: 'a'.repeat(2001) })).toEqual({
       description: 'The description must be at most 2000 characters.',
     })
   })
@@ -180,9 +183,9 @@ describe('isOverdue', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 9, 30, 12, 0, 0))
 
-    expect(isOverdue({ ...base, completed: true, due_date: '2026-10-01' })).toBe(
-      false,
-    )
+    expect(
+      isOverdue({ ...base, completed: true, due_date: '2026-10-01' }),
+    ).toBe(false)
     expect(isOverdue({ ...base, due_date: null })).toBe(false)
   })
 

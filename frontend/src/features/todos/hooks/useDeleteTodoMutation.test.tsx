@@ -9,7 +9,12 @@ import type { Todo } from '../types'
 import { useDeleteTodoMutation } from './useDeleteTodoMutation'
 
 vi.mock('../api/todos', () => ({
-  todosApi: { list: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
+  todosApi: {
+    list: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    remove: vi.fn(),
+  },
 }))
 
 function createClient() {

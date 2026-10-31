@@ -8,7 +8,12 @@ import { todosApi } from '../api/todos'
 import { useTodosQuery } from './useTodosQuery'
 
 vi.mock('../api/todos', () => ({
-  todosApi: { list: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
+  todosApi: {
+    list: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    remove: vi.fn(),
+  },
 }))
 
 function setup() {
