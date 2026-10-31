@@ -59,6 +59,13 @@ function workspaceSummary(workspace: WorkspaceReport) {
     `Typecheck ${workspace.verify.typecheckPassed ? 'passes' : 'fails'}; ${workspace.verify.testsPassed} tests pass, ${workspace.verify.testsFailed} fail.`,
     `Coverage: statements ${percentage(workspace.coverage.before.statements)} → ${percentage(workspace.coverage.after.statements)}, branches ${percentage(workspace.coverage.before.branches)} → ${percentage(workspace.coverage.after.branches)}.`,
   ];
+  const baseCheck = workspace.pullRequest?.baseCheck ?? [];
+  if (baseCheck.length > 0) {
+    const count = (outcome: string) => baseCheck.filter((result) => result.outcome === outcome).length;
+    sentences.push(
+      `On the base code, ${count('fails on base')} of the ${plural(baseCheck.length, 'new or changed case')} fail, ${count('passes on base')} pass and ${count('inconclusive')} ${count('inconclusive') === 1 ? 'is' : 'are'} inconclusive.`,
+    );
+  }
   if (workspace.keptWithoutReview.length > 0) {
     sentences.push(`${plural(workspace.keptWithoutReview.length, 'planned case')} kept without a review verdict.`);
   }

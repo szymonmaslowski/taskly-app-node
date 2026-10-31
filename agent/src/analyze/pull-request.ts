@@ -67,6 +67,11 @@ export async function readPullRequestDiff(repositoryRoot: string, baseSha: strin
   });
 }
 
+export async function readFileAtCommit(repositoryRoot: string, sha: string, repositoryPath: string) {
+  if (!gitObjectPattern.test(sha)) throw new Error(`Not a commit hash: ${JSON.stringify(sha)}`);
+  return runGit(repositoryRoot, ['show', '--no-textconv', `${sha}:${repositoryPath}`]);
+}
+
 type PlanPullRequestWorkOptions = {
   workspaceName: string;
   workspace: WorkspaceConfig;

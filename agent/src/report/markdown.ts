@@ -1,4 +1,5 @@
 import type { FileCoverage } from '../analyze/coverage.ts';
+import type { BaseCheckCase } from '../analyze/base-check.ts';
 import type { PullRequestResult } from '../orchestrator.ts';
 import type { Fraction, RunReport, WorkspaceReport } from './report.ts';
 
@@ -52,6 +53,25 @@ function renderPullRequestScope({ brokenTests, leftOutByCap, deletedSources }: P
   return lines;
 }
 
+function renderBaseCheck(baseCheck: BaseCheckCase[]) {
+  const withOutcome = (outcome: BaseCheckCase['outcome']) => baseCheck.filter((result) => result.outcome === outcome);
+  const passing = withOutcome('passes on base');
+  const inconclusive = withOutcome('inconclusive');
+  const lines = [
+    '### Checked against the base code',
+    '',
+    `The new and changed cases ran against the base versions of the changed source files: ${withOutcome('fails on base').length} fail there, as a test of the change should, ${passing.length} pass there too, ${inconclusive.length} inconclusive.`,
+    '',
+  ];
+  if (passing.length > 0) {
+    lines.push('Passing on base. These may test behaviour the PR didn\'t change, which is fine, or miss the change, which isn\'t:', '', list(passing, (result) => `\`${escapeCode(result.testFile)}\`: ${escapeMarkdown(result.name)}`), '');
+  }
+  if (inconclusive.length > 0) {
+    lines.push('Inconclusive, usually because the code they test is new in the PR:', '', list(inconclusive, (result) => `\`${escapeCode(result.testFile)}\`: ${escapeMarkdown(result.name)}`), '');
+  }
+  return lines;
+}
+
 function renderWorkspace(workspace: WorkspaceReport) {
   const lines: string[] = [`## ${escapeMarkdown(workspace.name)}`, ''];
   if (!workspace.applied) lines.push('**The changes were not applied, because verify failed.**', '');
@@ -96,6 +116,7 @@ function renderWorkspace(workspace: WorkspaceReport) {
       lines.push(`\`${escapeCode(file.testFile)}\``, list(file.names, escapeMarkdown), '');
     }
   }
+  if (workspace.pullRequest && workspace.pullRequest.baseCheck.length > 0) lines.push(...renderBaseCheck(workspace.pullRequest.baseCheck));
   if (workspace.flakyCases.length > 0) {
     lines.push(
       '### Flaky cases',

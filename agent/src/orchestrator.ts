@@ -3,7 +3,8 @@ import path from 'node:path';
 import type { z } from 'zod';
 import { loadAgentDefinition, type AgentDefinition } from './agents.ts';
 import type { CoverageByFile } from './analyze/coverage.ts';
-import { planPullRequestWork, readPullRequestDiff } from './analyze/pull-request.ts';
+import { classifyOnBase, type BaseCheckCase } from './analyze/base-check.ts';
+import { planPullRequestWork, readFileAtCommit, readPullRequestDiff, type ChangedFile } from './analyze/pull-request.ts';
 import { measureCoverage, planRepositoryWork, type WorkBatch } from './analyze/repository.ts';
 import { mapWithConcurrency } from './concurrency.ts';
 import { loadConfig, type LoopConfig, type StageConfig, type WorkspaceConfig } from './config.ts';
@@ -30,11 +31,17 @@ const maxRepositoryFileBytes = 2_000_000;
 
 type StageAgents = Record<StageName, AgentDefinition>;
 
+type PullRequestBase = {
+  sha: string;
+  changedSources: ChangedFile[];
+};
+
 type WorkspaceContext = {
   name: string;
   repositoryRoot: string;
   editableExistingTests?: Set<string>;
   pullRequestDescription?: string;
+  pullRequestBase?: PullRequestBase;
   knownFiles: Set<string>;
   testedFilesByTest: Map<string, string[]>;
   workspace: WorkspaceConfig;
@@ -113,6 +120,7 @@ export type FlakyResult = {
 
 export type PullRequestResult = {
   brokenTests: BrokenTest[];
+  baseCheck: BaseCheckCase[];
   leftOutByCap: string[];
   deletedSources: string[];
 };
@@ -491,6 +499,80 @@ async function removeFlakyCases(context: WorkspaceContext): Promise<FlakyResult>
   return { cases, removedCases, revertedCases, revertedFiles };
 }
 
+async function writeRunnerFile(context: WorkspaceContext, workspacePath: string, content: string | undefined) {
+  await assertNoLinksOnPath(context.directories.runner, workspacePath);
+  const runnerPath = path.join(context.directories.runner, workspacePath);
+  if (content === undefined) return rm(runnerPath, { force: true });
+  await mkdir(path.dirname(runnerPath), { recursive: true });
+  await writeFile(runnerPath, content);
+}
+
+// Sources the PR added are removed, so their tests fail to load on base and come out inconclusive instead of passing against the head version.
+async function placeChangedSources(context: WorkspaceContext, base: PullRequestBase, side: 'base' | 'head') {
+  const prefix = `${context.workspace.root}/`;
+  for (const file of base.changedSources) {
+    const workspacePath = file.path.slice(prefix.length);
+    if (side === 'head') {
+      await writeRunnerFile(context, workspacePath, await readRegularFile(path.join(context.repositoryRoot, file.path), maxRepositoryFileBytes));
+    } else if (file.status === 'added') {
+      await writeRunnerFile(context, workspacePath, undefined);
+    } else {
+      const basePath = file.status === 'renamed' ? file.previousPath : file.path;
+      await writeRunnerFile(context, workspacePath, await readFileAtCommit(context.repositoryRoot, base.sha, basePath));
+    }
+  }
+}
+
+async function listAgentCases(context: WorkspaceContext) {
+  const casesByFile = new Map<string, Set<string>>();
+  for (const testFile of await listChangedTestFiles(context)) {
+    const staged = await readStagedFile(context, testFile);
+    if (staged === undefined) continue;
+    const names = compareTestFile(testFile, await readOriginalFile(context, testFile), staged)
+      .filter((change) => change.kind !== 'deleted')
+      .map((change) => change.name);
+    if (names.length > 0) casesByFile.set(testFile, new Set(names));
+  }
+  return casesByFile;
+}
+
+// A new or changed case that also passes against the base versions of the changed sources doesn't notice the change.
+async function checkAgainstBase(context: WorkspaceContext): Promise<BaseCheckCase[]> {
+  const { pullRequestBase, workspace, directories, logger } = context;
+  if (!pullRequestBase) return [];
+  const agentCases = await listAgentCases(context);
+  if (agentCases.size === 0) return [];
+  logger.startStep('base check');
+  const prefix = `${workspace.root}/`;
+  const results: BaseCheckCase[] = [];
+  try {
+    await placeChangedSources(context, pullRequestBase, 'base');
+    const testRun = await runTests({
+      workspaceDirectory: directories.runner,
+      outputDirectory: directories.output,
+      workspace,
+      testFiles: [...agentCases.keys()].map((testFile) => testFile.slice(prefix.length)),
+    });
+    for (const [testFile, names] of agentCases) {
+      const workspacePath = testFile.slice(prefix.length);
+      const staged = (await readStagedFile(context, testFile)) ?? '';
+      const loadFailed = testRun.fileErrors.some((error) => error.file === workspacePath);
+      const fileCases = testRun.cases.filter((testCase) => testCase.file === workspacePath);
+      for (const testCase of fileCases) {
+        const isAgentCase = findCasesByRuntimeNames(testFile, staged, [testCase.fullName]).some((match) => names.has(match.name));
+        if (isAgentCase) results.push({ testFile, name: testCase.fullName, outcome: loadFailed ? 'inconclusive' : classifyOnBase(testCase) });
+      }
+      if (fileCases.length === 0) for (const name of names) results.push({ testFile, name, outcome: 'inconclusive' });
+    }
+  } finally {
+    await placeChangedSources(context, pullRequestBase, 'head');
+  }
+  const count = (outcome: BaseCheckCase['outcome']) => results.filter((result) => result.outcome === outcome).length;
+  for (const result of results.filter((candidate) => candidate.outcome === 'passes on base')) logger.untrusted(`passes on base ${result.testFile}: ${result.name}`);
+  logger.endStep(`${count('fails on base')} fail on base, ${count('passes on base')} pass on base, ${count('inconclusive')} inconclusive`);
+  return results;
+}
+
 function emptyBatchResult(module: string): BatchResult {
   return {
     module,
@@ -700,6 +782,7 @@ export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, 
         continue;
       }
       const directories = await createRunDirectories();
+      const isSourceFile = createMatcher(workspace.root, workspace.sources);
       try {
         logger.startStep(`analyze · ${name}`);
         await prepareRunnerWorkspace({ repositoryRoot, trackedFiles, workspace, destination: directories.runner });
@@ -736,6 +819,7 @@ export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, 
           repositoryRoot,
           editableExistingTests: pullRequestScope?.relatedTests,
           pullRequestDescription: mode.kind === 'pr' ? mode.description : undefined,
+          pullRequestBase: mode.kind === 'pr' ? { sha: mode.baseSha, changedSources: changedFiles.filter((file) => file.status !== 'deleted' && isSourceFile(file.path)) } : undefined,
           knownFiles: new Set(trackedFiles),
           testedFilesByTest: new Map(),
           workspace,
@@ -779,6 +863,11 @@ export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, 
           `typecheck ${verify.typecheckPassed ? 'passed' : 'failed'}, ${verify.testsPassed} passed, ${verify.testsFailed} failed, repository thresholds ${verify.repositoryThresholds}`,
         );
 
+        const baseCheck = await checkAgainstBase(context).catch((error: Error) => {
+          logger.untrusted(`base check failed: ${error.message}`);
+          return [];
+        });
+
         const changes = await diffStagingCopy(directories.staging, manifest);
         const testFileChanges: TestFileChanges[] = [];
         for (const testFile of [...changes.added, ...changes.modified, ...changes.deleted]) {
@@ -808,6 +897,7 @@ export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, 
           changedOutsideCases,
           pullRequest: pullRequestScope && {
             brokenTests: describeBrokenTests(brokenBefore, failingAfter, changes),
+            baseCheck,
             leftOutByCap: pullRequestScope.leftOutByCap,
             deletedSources: pullRequestScope.deletedSources,
           },

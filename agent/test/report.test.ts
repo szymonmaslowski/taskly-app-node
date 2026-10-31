@@ -104,6 +104,7 @@ describe('buildRunReport', () => {
           { testFile: 'backend/tests/validators.test.ts', outcome: 'updated by the agent' },
           { testFile: 'backend/tests/router.test.ts', outcome: 'left failing' },
         ],
+        baseCheck: [],
         leftOutByCap: ['backend/src/mappers.ts'],
         deletedSources: [],
       },
@@ -128,6 +129,27 @@ describe('buildRunReport', () => {
     const report = buildRunReport([changed]);
     expect(renderMarkdownReport(report)).toContain('`backend/tests/fixture.ts` **shared fixture or setup**');
     expect(buildSummary(report)).toContain('1 existing test file changed outside its cases, 1 of them shared fixtures or setup; check those too.');
+  });
+
+  it('reports which new cases notice the change when run against the base code', () => {
+    const checked: WorkspaceResult = {
+      ...result,
+      pullRequest: {
+        brokenTests: [],
+        baseCheck: [
+          { testFile: 'backend/tests/health.test.ts', name: 'health reports ok', outcome: 'fails on base' },
+          { testFile: 'backend/tests/health.test.ts', name: 'health keeps the status', outcome: 'passes on base' },
+          { testFile: 'backend/tests/filters.test.ts', name: 'filters by due date', outcome: 'inconclusive' },
+        ],
+        leftOutByCap: [],
+        deletedSources: [],
+      },
+    };
+    const report = buildRunReport([checked], 'pr');
+    const markdown = renderMarkdownReport(report);
+    expect(markdown).toContain('1 fail there, as a test of the change should, 1 pass there too, 1 inconclusive.');
+    expect(markdown).toContain('- `backend/tests/health.test.ts`: health keeps the status');
+    expect(buildSummary(report)).toContain('On the base code, 1 of the 3 new or changed cases fail, 1 pass and 1 is inconclusive.');
   });
 
   it('reports flaky cases with what the agent did to each', () => {
