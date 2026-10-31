@@ -13,3 +13,8 @@ export function fromModel(record: TodoRecord): Todo {
     updated_at: record.updated_at.toISOString(),
   });
 }
+
+export function toSummary(todo: Todo) {
+  const due = todo.due_date ? `, due ${todo.due_date}` : '';
+  return `${todo.title} (${todo.priority}${due})${todo.completed ? ' ✓' : ''}`;
+}
