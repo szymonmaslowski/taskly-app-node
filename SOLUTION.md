@@ -2,6 +2,15 @@
 
 `testeragent` writes and updates unit tests for the backend and the frontend. It runs on every pull request, checks its own tests in a sandbox and posts the results on a stacked pull request. The same agent filled the gaps in the existing code: [#8](https://github.com/szymonmaslowski/taskly-app-node/pull/8) took backend coverage from 30% to 97% of statements and the frontend from 47% to 99%.
 
+## Assumptions
+
+- The agent runs on Claude models through Claude Code, and the design relies on that: each model step is a Claude Code session, and the prompts and skills were tuned on Sonnet and Opus.
+- Unit tests only. Prisma calls are stubbed the way the existing tests do it, so no database is needed.
+- Verification runs `tsc` as well as the tests, since Vitest doesn't typecheck.
+- `backend/openapi.json` is the contract for routes. Where the code disagrees, the planner marks a contract mismatch instead of copying the code's behaviour.
+- Anyone with write access is trusted. For same-repository PRs, GitHub runs the workflow file from the PR, so a collaborator could read the secret by editing it. The controls protect against untrusted content inside trusted PRs (copied code, text written to steer the agent) and against stray local config. They keep the agent behaving as defined on `main`.
+- Docker is available: GitHub-hosted Ubuntu runners have it, and locally Docker Desktop.
+
 ## How it works
 
 ```
@@ -109,15 +118,6 @@ The run leaves its changes in the working tree and writes `report.md` and `repor
 The agent opened [#16](https://github.com/szymonmaslowski/taskly-app-node/pull/16).
 
 Merging #16 into #15 makes #15 green. The next run then finds nothing to add and ends with "No tests needed", as the trial on [#12](https://github.com/szymonmaslowski/taskly-app-node/pull/12) and [#13](https://github.com/szymonmaslowski/taskly-app-node/pull/13) showed.
-
-## Assumptions
-
-- The agent runs on Claude models through Claude Code, and the design relies on that: each model step is a Claude Code session, and the prompts and skills were tuned on Sonnet and Opus.
-- Unit tests only. Prisma calls are stubbed the way the existing tests do it, so no database is needed.
-- Verification runs `tsc` as well as the tests, since Vitest doesn't typecheck.
-- `backend/openapi.json` is the contract for routes. Where the code disagrees, the planner marks a contract mismatch instead of copying the code's behaviour.
-- Anyone with write access is trusted. For same-repository PRs, GitHub runs the workflow file from the PR, so a collaborator could read the secret by editing it. The controls protect against untrusted content inside trusted PRs (copied code, text written to steer the agent) and against stray local config. They keep the agent behaving as defined on `main`.
-- Docker is available: GitHub-hosted Ubuntu runners have it, and locally Docker Desktop.
 
 ## Limitations
 
