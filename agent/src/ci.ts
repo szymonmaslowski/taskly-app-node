@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.ts';
 import { exportPatch, findPatchProblems, inspectPatch } from './publish/patch.ts';
 import { findSecretLeaks } from './publish/secrets.ts';
+import { verifyPatchedCheckout } from './publish/verify.ts';
 
 const trustedRepositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 const [command, ...rest] = process.argv.slice(2);
@@ -43,10 +44,22 @@ async function scanCommand() {
   console.log(`No secrets found in ${texts.length} files`);
 }
 
+async function verifyCommand() {
+  const { values } = parseArgs({ args: rest, options: { repository: { type: 'string' }, output: { type: 'string' } } });
+  if (!values.repository || !values.output) fail('verify needs --repository and --output.');
+  const result = await verifyPatchedCheckout(trustedRepositoryRoot, path.resolve(values.repository));
+  await writeFile(values.output, `${JSON.stringify(result, null, 2)}\n`);
+  for (const workspace of result.workspaces) {
+    console.log(`${workspace.name}: typecheck ${workspace.typecheckPassed ? 'passed' : 'failed'}, ${workspace.testsPassed} passed, ${workspace.testsFailed} failed`);
+  }
+  if (result.problems.length > 0) fail(`Verification failed:\n${result.problems.map((problem) => `- ${problem}`).join('\n')}`);
+}
+
 const commands: Record<string, () => Promise<void>> = {
   'export-patch': exportCommand,
   'validate-patch': validateCommand,
   'scan-secrets': scanCommand,
+  verify: verifyCommand,
 };
 
 const run = command ? commands[command] : undefined;
