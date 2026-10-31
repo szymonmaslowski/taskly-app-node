@@ -9,6 +9,7 @@ import {
   idleMutation,
   loadingErrorQuery,
   pendingQuery,
+  refetchErrorQuery,
   successQuery,
 } from '../../test/queryResults'
 import { todoFixture } from '../../test/todoFixture'
@@ -464,19 +465,14 @@ it('displays a query failure and resets mutation errors before retrying', async 
   const user = userEvent.setup()
   const refetch = vi.fn().mockResolvedValue(undefined)
   const reset = vi.fn()
-  vi.mocked(useTodosQuery).mockReturnValue({
-    data: [],
-    isPending: false,
-    isFetching: false,
-    isError: true,
-    error: new Error('The server is unavailable.'),
-    refetch,
-  } as unknown as ReturnType<typeof useTodosQuery>)
-  vi.mocked(useUpdateTodoMutation).mockReturnValue({
-    error: null,
-    reset,
-    mutateAsync: vi.fn(),
-  } as unknown as ReturnType<typeof useUpdateTodoMutation>)
+  vi.mocked(useTodosQuery).mockReturnValue(
+    refetchErrorQuery([], new Error('The server is unavailable.'), {
+      refetch,
+    }),
+  )
+  vi.mocked(useUpdateTodoMutation).mockReturnValue(
+    idleMutation({ reset, mutateAsync: vi.fn() }),
+  )
   vi.mocked(useTodosBusy).mockReturnValue(false)
   vi.mocked(useNotice).mockReturnValue({ message: '', notify: vi.fn() })
   vi.mocked(useTodoFilters).mockReturnValue({

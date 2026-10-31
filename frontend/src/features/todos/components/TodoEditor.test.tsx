@@ -59,16 +59,12 @@ it('creates a new task and reports a successful save', async () => {
   const user = userEvent.setup()
   const create = vi.fn().mockResolvedValue(todoFixture)
   const update = vi.fn()
-  vi.mocked(useCreateTodoMutation).mockReturnValue({
-    isPending: false,
-    error: null,
-    mutateAsync: create,
-  } as unknown as ReturnType<typeof useCreateTodoMutation>)
-  vi.mocked(useUpdateTodoMutation).mockReturnValue({
-    isPending: false,
-    error: null,
-    mutateAsync: update,
-  } as unknown as ReturnType<typeof useUpdateTodoMutation>)
+  vi.mocked(useCreateTodoMutation).mockReturnValue(
+    idleMutation({ mutateAsync: create }),
+  )
+  vi.mocked(useUpdateTodoMutation).mockReturnValue(
+    idleMutation({ mutateAsync: update }),
+  )
   const onSaved = vi.fn()
   render(
     <TodoEditor todo="new" busy={false} onClose={vi.fn()} onSaved={onSaved} />,

@@ -1,7 +1,11 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
-import { idleMutation, pendingMutation } from '../../../test/queryResults'
+import {
+  errorMutation,
+  idleMutation,
+  pendingMutation,
+} from '../../../test/queryResults'
 import { todoFixture } from '../../../test/todoFixture'
 import { useDeleteTodoMutation } from '../hooks/useDeleteTodoMutation'
 import { DeleteTodoDialog } from './DeleteTodoDialog'
@@ -14,11 +18,11 @@ vi.mock('../hooks/useDeleteTodoMutation', () => ({
 it('shows a deletion error and allows cancelling without deleting', async () => {
   const user = userEvent.setup()
   const mutateAsync = vi.fn()
-  vi.mocked(useDeleteTodoMutation).mockReturnValue({
-    isPending: false,
-    error: new Error('Could not delete.'),
-    mutateAsync,
-  } as unknown as ReturnType<typeof useDeleteTodoMutation>)
+  vi.mocked(useDeleteTodoMutation).mockReturnValue(
+    errorMutation(new Error('Could not delete.'), todoFixture.id, {
+      mutateAsync,
+    }),
+  )
   const onClose = vi.fn()
   const onDeleted = vi.fn()
   render(
