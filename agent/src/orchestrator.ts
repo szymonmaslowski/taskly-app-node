@@ -11,9 +11,9 @@ import { collectFailures } from './failures.ts';
 import { createBufferedLogger, type Logger } from './logger.ts';
 import { isWritingAgent, runStage, type StageUsage } from './run-stage.ts';
 import { createRunDirectories, removeRunDirectories, type RunDirectories } from './sandbox/directories.ts';
-import { assertPrintablePaths, createMatcher, listTrackedFiles, readRegularFile } from './sandbox/files.ts';
+import { assertNoLinksOnPath, assertPrintablePaths, createMatcher, listTrackedFiles, readRegularFile } from './sandbox/files.ts';
 import { buildImages } from './sandbox/images.ts';
-import { checkRepositoryThresholds, installRunnerWorkspace, prepareRunnerWorkspace, runTests, runTypecheck } from './sandbox/runner.ts';
+import { checkRepositoryThresholds, installRunnerWorkspace, prepareRunnerWorkspace, runInRunner, runTests, runTypecheck } from './sandbox/runner.ts';
 import { createStagingCopy, diffStagingCopy, findDisallowedChanges, type StagingChanges, type StagingManifest } from './sandbox/staging.ts';
 import { applyStagingToRepository, syncStagingToRunner } from './sandbox/sync.ts';
 import type { TestCaseResult } from './sandbox/test-results.ts';
@@ -558,6 +558,37 @@ async function loadStageSkills(trustedRepositoryRoot: string, workspaceSkill: st
   } satisfies Record<StageName, Skill[]>;
 }
 
+// The formatter runs in the runner like any other workspace tool; the formatted files come back to staging only as regular files,
+// with no link anywhere on their path, and then pass the same checks as the agent's own writes.
+async function formatChangedFiles(context: WorkspaceContext) {
+  const { workspace, directories, logger } = context;
+  if (!workspace.commands.format) return;
+  const changes = await diffStagingCopy(directories.staging, context.manifest);
+  const changedFiles = [...changes.added, ...changes.modified];
+  if (changedFiles.length === 0) return;
+  logger.startStep('format');
+  const prefix = `${workspace.root}/`;
+  const workspacePaths = changedFiles.map((changedFile) => changedFile.slice(prefix.length));
+  const result = await runInRunner({
+    workspaceDirectory: directories.runner,
+    outputDirectory: directories.output,
+    command: workspace.commands.format,
+    args: workspacePaths,
+    network: false,
+    timeoutMilliseconds: 120_000,
+  });
+  if (result.exitCode !== 0) {
+    logger.endStep(`formatter failed, files left as written: ${result.stderr.trim().slice(0, 200)}`);
+    return;
+  }
+  for (const workspacePath of workspacePaths) {
+    await assertNoLinksOnPath(directories.runner, workspacePath);
+    await writeStagedFile(context, `${prefix}${workspacePath}`, await readRegularFile(path.join(directories.runner, workspacePath), maxRepositoryFileBytes));
+  }
+  await checkStagingChanges(context);
+  logger.endStep(`${workspacePaths.length} files formatted`);
+}
+
 export type RunMode =
   | { kind: 'repo'; modulePrefix?: string; maxBatches?: number }
   | { kind: 'pr'; baseSha: string; headSha: string; description?: string };
@@ -657,6 +688,7 @@ export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, 
       };
       const batchResults: BatchResult[] = [];
       for (const batch of batches) batchResults.push(await processBatchOrRollBack(context, batch));
+      await formatChangedFiles(context);
 
       logger.startStep(`verify · ${name}`);
       const typecheck = await runTypecheck(directories.runner, directories.output, workspace);

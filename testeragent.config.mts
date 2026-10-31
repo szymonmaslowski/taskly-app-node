@@ -43,6 +43,7 @@ export default defineConfig({
         install: ['npm ci --ignore-scripts'],
         typecheck: 'node_modules/.bin/tsc --noEmit',
         test: 'node_modules/.bin/vitest run',
+        format: 'node_modules/.bin/prettier --write',
       },
     },
   },
