@@ -112,6 +112,7 @@ Merging #16 into #15 makes #15 green. The next run then finds nothing to add and
 
 ## Assumptions
 
+- The agent runs on Claude models through Claude Code, and the design relies on that: each model step is a Claude Code session, and the prompts and skills were tuned on Sonnet and Opus.
 - Unit tests only. Prisma calls are stubbed the way the existing tests do it, so no database is needed.
 - Verification runs `tsc` as well as the tests, since Vitest doesn't typecheck.
 - `backend/openapi.json` is the contract for routes. Where the code disagrees, the planner marks a contract mismatch instead of copying the code's behaviour.
@@ -130,6 +131,7 @@ Merging #16 into #15 makes #15 green. The next run then finds nothing to add and
 - **The secret scan is not a guarantee.** A deliberate custom encoding gets past it. The real controls are the file allowlist, no symlinks and no Bash.
 - **The token is personal.** A subscription token is rate-limited in 5-hour windows. Hitting the limit fails the check.
 - **No egress filter on the agent container.** The model has no tool that reaches the network, but the container itself isn't limited to the Anthropic API.
+- **Switching model provider takes work.** Another Claude model is a config change. Another provider means replacing the stage runner ([`agent/src/run-stage.ts`](agent/src/run-stage.ts)), the agent image and the egress allowlist, then checking result quality again. The orchestrator, sandbox, checks, report, skills and agent prompts stay as they are.
 - **One agent session at a time.** Fixers edit the same copy of the files, so `agentParallelism` is 1.
 
 ## For production
