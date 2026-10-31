@@ -14,8 +14,14 @@ async function buildImage(trustedRepositoryRoot: string, dockerfileName: string,
   if (result.exitCode !== 0) throw new Error(`Building ${tag} failed: ${result.stderr.trim()}`);
 }
 
+const images = {
+  runner: { dockerfileName: 'runner.Dockerfile', tag: runnerImage },
+  agent: { dockerfileName: 'agent.Dockerfile', tag: agentImage },
+};
+
 // The Dockerfiles decide what runs with network access, so they must come from the base checkout, never the PR head.
-export async function buildImages(trustedRepositoryRoot: string) {
-  await buildImage(trustedRepositoryRoot, 'runner.Dockerfile', runnerImage);
-  await buildImage(trustedRepositoryRoot, 'agent.Dockerfile', agentImage);
+// The workflow builds the same Dockerfiles with the Actions layer cache and loads them under these tags, so it skips this step.
+export async function buildImages(trustedRepositoryRoot: string, names: (keyof typeof images)[] = ['runner', 'agent']) {
+  if (process.env.TESTERAGENT_IMAGES_PREBUILT === 'true') return;
+  for (const name of names) await buildImage(trustedRepositoryRoot, images[name].dockerfileName, images[name].tag);
 }

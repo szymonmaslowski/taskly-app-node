@@ -20,7 +20,7 @@ export type WorkspaceVerification = {
 // Runs in a job without secrets: the patched head is installed, typechecked and tested in the runner, like any other PR code.
 export async function verifyPatchedCheckout(trustedRepositoryRoot: string, repositoryRoot: string) {
   const config = await loadConfig(trustedRepositoryRoot);
-  await buildImages(trustedRepositoryRoot);
+  await buildImages(trustedRepositoryRoot, ['runner']);
   const trackedFiles = await listTrackedFiles(repositoryRoot);
   const changedPaths = new Set(await listChangedPaths(repositoryRoot));
   const workspaces: WorkspaceVerification[] = [];
