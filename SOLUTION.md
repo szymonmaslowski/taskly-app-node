@@ -126,9 +126,21 @@ The run leaves its changes in the working tree and writes `report.md` and `repor
 
 [#15](https://github.com/szymonmaslowski/taskly-app-node/pull/15) adds a "Due" filter (`GET /api/todos?due_before=` in the backend, a select and `matchesDue` in the frontend) and shortens the title limit from 120 to 100 characters. It adds no tests. Its description says the shorter limit is intended.
 
-The agent opened [#16](https://github.com/szymonmaslowski/taskly-app-node/pull/16).
+The [agent run](https://github.com/szymonmaslowski/taskly-app-node/actions/runs/41193864937) took 7 minutes and opened [#16](https://github.com/szymonmaslowski/taskly-app-node/pull/16), which holds the tests and the full report. What the agent decided:
 
-Merging #16 into #15 makes #15 green. The next run then finds nothing to add and ends with "No tests needed", as the trial on [#12](https://github.com/szymonmaslowski/taskly-app-node/pull/12) and [#13](https://github.com/szymonmaslowski/taskly-app-node/pull/13) showed.
+- **Updated the tests the PR breaks.** One existing test file per workspace (`backend/tests/validators.test.ts`, `frontend/src/features/todos/utils/todos.test.ts`) failed on the head because of the 100-character limit. The agent updated both, and the report lists them first.
+- **Added cases for the new code.** 6 backend cases in 3 test files: the `due_before` filter, its validation and the new limit. 10 frontend cases in 4 test files: each due option, local date boundaries and the filter wiring. The plan reviewer dropped 4 backend and 3 frontend cases, each with a reason, such as duplicating an existing test.
+- **Sent the backend tests back once.** The test review found a case meant to catch "a title limit that is not 100" that only checked that 100 characters are accepted. The base check showed it also passes against the old limit of 120. The writer revised it. The frontend tests had no findings.
+
+The results:
+
+- **Backend.** Typecheck passes and 111 tests pass. Coverage is 97% of statements and 98% of branches, up from 95% and 91% on the PR head; the new `filters.ts` is fully covered.
+- **Frontend.** Typecheck passes and 162 tests pass. Coverage is 99% of statements and branches, up from 93% and 92% on the PR head.
+- **Against the base code,** 4 of the 8 backend and 5 of the 12 frontend new or changed cases fail there. The rest pass there too or are inconclusive, mostly because they test code that is new in the PR; the report lists them. No case was flaky.
+- **Skills used:** `unit-test-principles`, `unit-test-planning`, `unit-test-reviewing`, `unit-test-writing`, the workspace skill and `TESTING.md`.
+- **Cost:** 20 model sessions, 12 on Sonnet and 8 on Opus, $2.32.
+
+#15's own CI fails until #16 is merged into it, because the PR breaks an existing test and #16 holds the update. Merging #16 into #15 makes #15 green. The next run then finds nothing to add and ends with "No tests needed", as the trial on [#12](https://github.com/szymonmaslowski/taskly-app-node/pull/12) and [#13](https://github.com/szymonmaslowski/taskly-app-node/pull/13) showed.
 
 ## Limitations
 
