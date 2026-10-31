@@ -28,6 +28,7 @@ const workspaceSchema = z.strictObject({
     install: z.array(z.string().min(1)).min(1),
     typecheck: z.string().min(1),
     test: z.string().min(1),
+    format: z.string().min(1).optional(),
   }),
 });
 
