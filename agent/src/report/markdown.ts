@@ -1,4 +1,5 @@
 import type { FileCoverage } from '../analyze/coverage.ts';
+import type { BaseCheckCase } from '../analyze/base-check.ts';
 import type { PullRequestResult } from '../orchestrator.ts';
 import type { Fraction, RunReport, WorkspaceReport } from './report.ts';
 
@@ -52,6 +53,25 @@ function renderPullRequestScope({ brokenTests, leftOutByCap, deletedSources }: P
   return lines;
 }
 
+function renderBaseCheck(baseCheck: BaseCheckCase[]) {
+  const withOutcome = (outcome: BaseCheckCase['outcome']) => baseCheck.filter((result) => result.outcome === outcome);
+  const passing = withOutcome('passes on base');
+  const inconclusive = withOutcome('inconclusive');
+  const lines = [
+    '### Checked against the base code',
+    '',
+    `The new and changed cases ran against the base versions of the changed source files: ${withOutcome('fails on base').length} fail there, as a test of the change should, ${passing.length} pass there too, ${inconclusive.length} inconclusive.`,
+    '',
+  ];
+  if (passing.length > 0) {
+    lines.push('Passing on base. These may test behaviour the PR didn\'t change, which is fine, or miss the change, which isn\'t:', '', list(passing, (result) => `\`${escapeCode(result.testFile)}\`: ${escapeMarkdown(result.name)}`), '');
+  }
+  if (inconclusive.length > 0) {
+    lines.push('Inconclusive, usually because the code they test is new in the PR:', '', list(inconclusive, (result) => `\`${escapeCode(result.testFile)}\`: ${escapeMarkdown(result.name)}`), '');
+  }
+  return lines;
+}
+
 function renderWorkspace(workspace: WorkspaceReport) {
   const lines: string[] = [`## ${escapeMarkdown(workspace.name)}`, ''];
   if (!workspace.applied) lines.push('**The changes were not applied, because verify failed.**', '');
@@ -95,6 +115,30 @@ function renderWorkspace(workspace: WorkspaceReport) {
     for (const file of workspace.addedCases) {
       lines.push(`\`${escapeCode(file.testFile)}\``, list(file.names, escapeMarkdown), '');
     }
+  }
+  if (workspace.pullRequest && workspace.pullRequest.baseCheck.length > 0) lines.push(...renderBaseCheck(workspace.pullRequest.baseCheck));
+  if (workspace.implReview.length > 0) {
+    lines.push('### Review of the written tests', '');
+    workspace.implReview.forEach((round, index) => {
+      const outcome = round.findings.length === 0 ? 'no findings' : `${round.findings.length} findings${round.revised ? ', blocker and major ones sent back to the writer' : ''}`;
+      lines.push(`Round ${index + 1}: ${outcome}.`, '');
+      if (round.findings.length > 0) {
+        lines.push(
+          list(round.findings, (finding) => `**${finding.severity}** \`${escapeCode(finding.testFile)}\`: ${escapeMarkdown(finding.caseName)}: ${escapeMarkdown(finding.issue)} (${escapeMarkdown(finding.rule)})`),
+          '',
+        );
+      }
+    });
+  }
+  if (workspace.flakyCases.length > 0) {
+    lines.push(
+      '### Flaky cases',
+      '',
+      'These both passed and failed across shuffled reruns. The agent removes its own new cases and restores changed ones; existing cases stay as they are.',
+      '',
+      list(workspace.flakyCases, (flakyCase) => `\`${escapeCode(flakyCase.testFile)}\`: ${escapeMarkdown(flakyCase.name)}: ${flakyCase.outcome}`),
+      '',
+    );
   }
   const notDone = [
     ...workspace.failedBatches.map((failed) => `batch \`${escapeCode(failed.module)}\` failed and was rolled back: ${escapeMarkdown(failed.reason)}`),

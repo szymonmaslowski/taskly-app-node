@@ -44,8 +44,8 @@ const config = configSchema.parse({
       commands: { install: ['npm ci --ignore-scripts'], typecheck: 'tsc', test: 'vitest run' },
     },
   },
-  stages: { plan: stage, planReview: stage, write: stage, fix: stage, lastFix: stage },
-  loop: { planRounds: 2, outputAttempts: 2, fixAttempts: 3, agentParallelism: 1 },
+  stages: { plan: stage, planReview: stage, write: stage, fix: stage, lastFix: stage, implReview: stage },
+  loop: { planRounds: 2, outputAttempts: 2, fixAttempts: 3, agentParallelism: 1, planParallelism: 2, flakyReruns: 2, implReviewRounds: 1 },
 });
 
 async function createHead() {

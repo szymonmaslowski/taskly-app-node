@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { planPullRequestWork, readPullRequestDiff, type ChangedFile } from '../src/analyze/pull-request.ts';
+import { planPullRequestWork, readFileAtCommit, readPullRequestDiff, type ChangedFile } from '../src/analyze/pull-request.ts';
 import type { WorkspaceConfig } from '../src/config.ts';
 
 const temporaryDirectories: string[] = [];
@@ -35,6 +35,16 @@ async function createRepository(files: Record<string, string>) {
   git(repository, 'commit', '--quiet', '-m', 'base');
   return { repository, baseSha: git(repository, 'rev-parse', 'HEAD') };
 }
+
+describe('readFileAtCommit', () => {
+  it('reads a file as it was in an earlier commit, and refuses anything but a commit hash', async () => {
+    const { repository, baseSha } = await createRepository({ 'backend/src/router.ts': 'export const limit = 120;\n' });
+    await writeFiles(repository, { 'backend/src/router.ts': 'export const limit = 100;\n' });
+    git(repository, 'commit', '--quiet', '-am', 'head');
+    expect(await readFileAtCommit(repository, baseSha, 'backend/src/router.ts')).toBe('export const limit = 120;\n');
+    await expect(readFileAtCommit(repository, 'HEAD~1', 'backend/src/router.ts')).rejects.toThrow(/Not a commit hash/);
+  });
+});
 
 describe('readPullRequestDiff', () => {
   it('reports added, modified, deleted and renamed files with their changed lines', async () => {

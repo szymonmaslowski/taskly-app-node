@@ -22,6 +22,12 @@ function attentionSentences(workspace: WorkspaceReport) {
   if (failedBatches > 0) sentences.push(`${plural(failedBatches, 'batch', 'batches')} failed and ${failedBatches === 1 ? 'was' : 'were'} rolled back.`);
   const stillFailing = workspace.remainingFailures.length;
   if (stillFailing > 0) sentences.push(`${plural(stillFailing, 'test file')} still ${stillFailing === 1 ? 'fails' : 'fail'}.`);
+  const flaky = workspace.flakyCases.length;
+  if (flaky > 0) {
+    const leftAsIs = workspace.flakyCases.filter((flakyCase) => flakyCase.outcome === 'left as is').length;
+    const detail = leftAsIs > 0 ? `; ${leftAsIs} of them existing tests the agent left as they are` : '';
+    sentences.push(`${plural(flaky, 'flaky case')} found in shuffled reruns${detail}.`);
+  }
   const fewerAssertions = workspace.existingTestsChanged.filter((change) => change.fewerAssertions).length;
   if (workspace.existingTestsChanged.length > 0) {
     const detail = fewerAssertions > 0 ? `, ${fewerAssertions} with fewer assertions` : '';
@@ -53,6 +59,23 @@ function workspaceSummary(workspace: WorkspaceReport) {
     `Typecheck ${workspace.verify.typecheckPassed ? 'passes' : 'fails'}; ${workspace.verify.testsPassed} tests pass, ${workspace.verify.testsFailed} fail.`,
     `Coverage: statements ${percentage(workspace.coverage.before.statements)} → ${percentage(workspace.coverage.after.statements)}, branches ${percentage(workspace.coverage.before.branches)} → ${percentage(workspace.coverage.after.branches)}.`,
   ];
+  const reviewRounds = workspace.implReview.length;
+  if (reviewRounds > 0) {
+    const revisions = workspace.implReview.filter((round) => round.revised).length;
+    const lastFindings = workspace.implReview[reviewRounds - 1].findings.length;
+    sentences.push(
+      revisions > 0
+        ? `The test review sent the tests back to the writer ${revisions === 1 ? 'once' : `${revisions} times`}.`
+        : `The test review found ${lastFindings === 0 ? 'nothing to change' : `only minor problems (${lastFindings})`}.`,
+    );
+  }
+  const baseCheck = workspace.pullRequest?.baseCheck ?? [];
+  if (baseCheck.length > 0) {
+    const count = (outcome: string) => baseCheck.filter((result) => result.outcome === outcome).length;
+    sentences.push(
+      `On the base code, ${count('fails on base')} of the ${plural(baseCheck.length, 'new or changed case')} fail, ${count('passes on base')} pass and ${count('inconclusive')} ${count('inconclusive') === 1 ? 'is' : 'are'} inconclusive.`,
+    );
+  }
   if (workspace.keptWithoutReview.length > 0) {
     sentences.push(`${plural(workspace.keptWithoutReview.length, 'planned case')} kept without a review verdict.`);
   }
@@ -61,5 +84,8 @@ function workspaceSummary(workspace: WorkspaceReport) {
 }
 
 export function buildSummary(report: RunReport) {
+  if (report.workspaces.length === 0) {
+    return report.mode === 'pr' ? 'No source files the agent covers changed in this pull request.' : 'No workspace had work to do.';
+  }
   return report.workspaces.map(workspaceSummary).join('\n\n');
 }

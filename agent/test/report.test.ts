@@ -24,6 +24,7 @@ const result: WorkspaceResult = {
     write: ['unit-test-principles', 'unit-test-writing', 'backend-unit-tests', 'backend-unit-tests/writing.md'],
     fix: ['unit-test-principles', 'unit-test-writing', 'reading-test-results', 'backend-unit-tests', 'backend-unit-tests/writing.md'],
     lastFix: ['unit-test-principles', 'unit-test-writing', 'reading-test-results', 'backend-unit-tests', 'backend-unit-tests/writing.md'],
+    implReview: ['unit-test-principles', 'unit-test-reviewing', 'unit-test-reviewing/code.md', 'backend-unit-tests', 'backend-unit-tests/reviewing.md'],
   },
   coverageBefore: new Map([['backend/src/api/health.ts', coverage(0, 0)]]),
   coverageAfter: new Map([['backend/src/api/health.ts', coverage(10, 4)]]),
@@ -56,6 +57,8 @@ const result: WorkspaceResult = {
     },
   ],
   changedOutsideCases: [],
+  implReview: [],
+  flaky: { cases: [], removedCases: [], revertedCases: [], revertedFiles: [] },
   usages: [usage, { ...usage, costUsd: 0.2 }],
 };
 
@@ -103,6 +106,7 @@ describe('buildRunReport', () => {
           { testFile: 'backend/tests/validators.test.ts', outcome: 'updated by the agent' },
           { testFile: 'backend/tests/router.test.ts', outcome: 'left failing' },
         ],
+        baseCheck: [],
         leftOutByCap: ['backend/src/mappers.ts'],
         deletedSources: [],
       },
@@ -127,6 +131,55 @@ describe('buildRunReport', () => {
     const report = buildRunReport([changed]);
     expect(renderMarkdownReport(report)).toContain('`backend/tests/fixture.ts` **shared fixture or setup**');
     expect(buildSummary(report)).toContain('1 existing test file changed outside its cases, 1 of them shared fixtures or setup; check those too.');
+  });
+
+  it('reports which new cases notice the change when run against the base code', () => {
+    const checked: WorkspaceResult = {
+      ...result,
+      pullRequest: {
+        brokenTests: [],
+        baseCheck: [
+          { testFile: 'backend/tests/health.test.ts', name: 'health reports ok', outcome: 'fails on base' },
+          { testFile: 'backend/tests/health.test.ts', name: 'health keeps the status', outcome: 'passes on base' },
+          { testFile: 'backend/tests/filters.test.ts', name: 'filters by due date', outcome: 'inconclusive' },
+        ],
+        leftOutByCap: [],
+        deletedSources: [],
+      },
+    };
+    const report = buildRunReport([checked], 'pr');
+    const markdown = renderMarkdownReport(report);
+    expect(markdown).toContain('1 fail there, as a test of the change should, 1 pass there too, 1 inconclusive.');
+    expect(markdown).toContain('- `backend/tests/health.test.ts`: health keeps the status');
+    expect(buildSummary(report)).toContain('On the base code, 1 of the 3 new or changed cases fail, 1 pass and 1 is inconclusive.');
+  });
+
+  it('reports the review of the written tests and whether it sent them back', () => {
+    const finding = { testFile: 'backend/tests/health.test.ts', caseName: 'reports ok', severity: 'major' as const, rule: 'AP4', issue: 'Asserts only the status.', fix: 'Assert the body too.' };
+    const reviewed: WorkspaceResult = { ...result, implReview: [{ findings: [finding], revised: true }] };
+    const report = buildRunReport([reviewed]);
+    expect(renderMarkdownReport(report)).toContain('- **major** `backend/tests/health.test.ts`: reports ok: Asserts only the status. (AP4)');
+    expect(buildSummary(report)).toContain('The test review sent the tests back to the writer once.');
+    expect(report.workspaces[0].skillsUsed).toContain('unit-test-reviewing');
+  });
+
+  it('reports flaky cases with what the agent did to each', () => {
+    const flaky: WorkspaceResult = {
+      ...result,
+      flaky: {
+        cases: [
+          { testFile: 'backend/tests/health.test.ts', name: 'health reports ok' },
+          { testFile: 'backend/tests/router.test.ts', name: 'router lists tasks' },
+        ],
+        removedCases: [{ testFile: 'backend/tests/health.test.ts', name: 'health reports ok' }],
+        revertedCases: [],
+        revertedFiles: [],
+      },
+    };
+    const report = buildRunReport([flaky]);
+    expect(report.workspaces[0].flakyCases.map((flakyCase) => flakyCase.outcome)).toEqual(['removed', 'left as is']);
+    expect(renderMarkdownReport(report)).toContain('- `backend/tests/router.test.ts`: router lists tasks: left as is');
+    expect(buildSummary(report)).toContain('2 flaky cases found in shuffled reruns; 1 of them existing tests the agent left as they are.');
   });
 
   it('renders the changed existing tests before the new cases', () => {
@@ -176,5 +229,11 @@ describe('buildSummary', () => {
     expect(summary).toContain('After failing, 1 new case was removed.');
     expect(summary).toContain('1 batch failed and was rolled back.');
     expect(summary).toContain('no existing test changed');
+  });
+
+  it('says so when a pull request changed no source file the agent covers', () => {
+    const report = buildRunReport([], 'pr');
+    expect(buildSummary(report)).toBe('No source files the agent covers changed in this pull request.');
+    expect(renderMarkdownReport({ ...report, summary: buildSummary(report) })).toContain('No source files the agent covers changed in this pull request.');
   });
 });

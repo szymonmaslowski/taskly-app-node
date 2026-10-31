@@ -87,10 +87,18 @@ describe('buildClaudeArguments', () => {
   });
 });
 
+const egress = { network: 'testeragent-egress-test', proxyUrl: 'http://egress-proxy:3128' };
+
 describe('buildDockerArguments', () => {
   it('mounts the working directory read-only for agents that do not write', () => {
-    expect(buildDockerArguments('/tmp/staging', false, [])).toContain('/tmp/staging:/workspace:ro');
-    expect(buildDockerArguments('/tmp/staging', true, [])).toContain('/tmp/staging:/workspace');
+    expect(buildDockerArguments('/tmp/staging', false, [], egress)).toContain('/tmp/staging:/workspace:ro');
+    expect(buildDockerArguments('/tmp/staging', true, [], egress)).toContain('/tmp/staging:/workspace');
+  });
+
+  it('puts the agent on the internal network and sends its traffic through the egress proxy', () => {
+    const args = buildDockerArguments('/tmp/staging', false, [], egress);
+    expect(args.slice(args.indexOf('--network'), args.indexOf('--network') + 2)).toEqual(['--network', 'testeragent-egress-test']);
+    expect(args).toContain('HTTPS_PROXY=http://egress-proxy:3128');
   });
 });
 

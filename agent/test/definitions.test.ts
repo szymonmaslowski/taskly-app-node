@@ -1,10 +1,11 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadAgentDefinition } from '../src/agents.ts';
 import { loadConfig } from '../src/config.ts';
-import { loadSkill, loadSkillReference, parseSkill } from '../src/skills.ts';
+import { loadSkill, loadSkillReference, loadTestingRules, parseSkill } from '../src/skills.ts';
 import { stageWiring } from '../src/stages.ts';
 
 const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -18,12 +19,28 @@ describe('repository agent definitions', () => {
   });
 });
 
+describe('loadTestingRules', () => {
+  it("loads the repository's TESTING.md", async () => {
+    expect((await loadTestingRules(repositoryRoot))?.instructions).toMatch(/^# Testing in taskly/);
+  });
+
+  it('returns nothing for a repository without one', async () => {
+    const emptyRoot = await mkdtemp(path.join(tmpdir(), 'testeragent-rules-'));
+    try {
+      expect(await loadTestingRules(emptyRoot)).toBeUndefined();
+    } finally {
+      await rm(emptyRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('stage wiring', () => {
   it('points every stage at an agent file, skills and a workspace reference that exist', async () => {
     const config = await loadConfig(repositoryRoot);
     for (const stage of Object.values(stageWiring)) {
       expect((await loadAgentDefinition(repositoryRoot, stage.agent)).systemPrompt).not.toBe('');
       for (const name of stage.skills) expect((await loadSkill(repositoryRoot, name)).instructions).not.toBe('');
+      for (const reference of stage.references ?? []) expect((await loadSkillReference(repositoryRoot, reference.skill, reference.file)).instructions).not.toBe('');
       for (const workspace of Object.values(config.workspaces)) {
         expect((await loadSkillReference(repositoryRoot, workspace.skill, stage.workspaceReference)).instructions).not.toBe('');
       }
