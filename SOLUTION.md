@@ -29,8 +29,8 @@ Inside `generate`, a TypeScript orchestrator (`agent/src/orchestrator.ts`) runs 
 - **The orchestrator decides; models do the creative work.**
   - What: a TypeScript program runs the pipeline. It picks the scope, runs every test, counts rounds and attempts, and decides pass or fail. Models only plan, review, write and fix.
   - Why: those decisions must not depend on what a model chooses. Tests always run, the agent can't declare its own success, and cost stays bounded.
-- **Each stage is one Claude Code session.**
-  - What: every stage runs `claude -p` with its agent's system prompt, a tool list, a JSON schema for the answer and caps on turns, time and budget.
+- **Each step that uses a model is one Claude Code session.**
+  - What: plan, plan review, write and fix (the code calls these stages) each run `claude -p` with the agent's system prompt, a tool list, a JSON schema for the answer and caps on turns, time and budget. Analysis, test runs, clean-up, formatting and the report are plain code.
   - Why: Claude Code brings file tools and the standard skill format. Answers come back in a shape code can validate, and a stuck stage can't run up a bill.
 - **Generic stage agents, stack knowledge in skills.**
   - What: four agents (planner, plan reviewer, writer, fixer) serve both workspaces. The `backend-unit-tests` and `frontend-unit-tests` skills hold the stack conventions, and the config maps each workspace to its skill.
