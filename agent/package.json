@@ -8,6 +8,7 @@
   },
   "scripts": {
     "agent": "node src/cli.ts",
+    "ci": "node src/ci.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
