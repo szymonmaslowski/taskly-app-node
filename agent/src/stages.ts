@@ -28,4 +28,4 @@ export const stageWiring = {
 // The config can tighten these but not loosen them, so a typo can't turn into a runaway bill.
 export const stageCaps = { maxTurns: 60, timeoutMinutes: 30, maxBudgetUsd: 10 };
 
-export const loopCaps = { planRounds: 3, outputAttempts: 3, fixAttempts: 4, agentParallelism: 4 };
+export const loopCaps = { planRounds: 3, outputAttempts: 3, fixAttempts: 4, agentParallelism: 4, flakyReruns: 5 };

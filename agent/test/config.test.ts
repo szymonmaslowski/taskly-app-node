@@ -26,12 +26,11 @@ describe('loadConfig', () => {
 
 const stage = { model: 'claude-sonnet-5-5', effort: 'medium' as const, maxTurns: 10, timeoutMinutes: 5, maxBudgetUsd: 1 };
 const stages = { plan: stage, planReview: stage, write: stage, fix: stage, lastFix: stage };
-const loop = { planRounds: 2, outputAttempts: 2, fixAttempts: 3, agentParallelism: 1 };
+const loop = { planRounds: 2, outputAttempts: 2, fixAttempts: 3, agentParallelism: 1, flakyReruns: 2 };
 
 describe('configSchema', () => {
   it('fills in defaults for optional settings', () => {
     const config = configSchema.parse({ workspaces: { backend: workspace() }, stages, loop });
-    expect(config.flakyReruns).toBe(2);
     expect(config.limits).toEqual({ maxChangedSourceFiles: 15 });
     expect(config.workspaces.backend).toMatchObject({ ignoredSources: [], shared: [], context: [] });
   });
@@ -70,6 +69,7 @@ describe('configSchema', () => {
     { stages: { ...stages, fix: { ...stage, maxBudgetUsd: 50 } }, loop },
     { stages: { ...stages, plan: { ...stage, maxTurns: 500 } }, loop },
     { stages, loop: { ...loop, fixAttempts: 10 } },
+    { stages, loop: { ...loop, flakyReruns: 20 } },
   ])('refuses limits above the hard caps: %j', (settings) => {
     expect(() => configSchema.parse({ workspaces: { backend: workspace() }, ...settings })).toThrow();
   });

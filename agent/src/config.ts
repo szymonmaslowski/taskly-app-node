@@ -45,13 +45,13 @@ const loopSchema = z.strictObject({
   outputAttempts: z.number().int().min(1).max(loopCaps.outputAttempts),
   fixAttempts: z.number().int().min(0).max(loopCaps.fixAttempts),
   agentParallelism: z.number().int().min(1).max(loopCaps.agentParallelism),
+  flakyReruns: z.number().int().min(0).max(loopCaps.flakyReruns),
 });
 
 export const configSchema = z.strictObject({
   workspaces: z
     .record(lowercaseName, workspaceSchema)
     .refine((workspaces) => Object.keys(workspaces).length > 0, 'at least one workspace is required'),
-  flakyReruns: z.number().int().min(0).default(2),
   limits: z
     .strictObject({
       maxChangedSourceFiles: z.number().int().positive().default(15),

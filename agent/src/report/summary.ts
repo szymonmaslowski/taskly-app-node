@@ -22,6 +22,12 @@ function attentionSentences(workspace: WorkspaceReport) {
   if (failedBatches > 0) sentences.push(`${plural(failedBatches, 'batch', 'batches')} failed and ${failedBatches === 1 ? 'was' : 'were'} rolled back.`);
   const stillFailing = workspace.remainingFailures.length;
   if (stillFailing > 0) sentences.push(`${plural(stillFailing, 'test file')} still ${stillFailing === 1 ? 'fails' : 'fail'}.`);
+  const flaky = workspace.flakyCases.length;
+  if (flaky > 0) {
+    const leftAsIs = workspace.flakyCases.filter((flakyCase) => flakyCase.outcome === 'left as is').length;
+    const detail = leftAsIs > 0 ? `; ${leftAsIs} of them existing tests the agent left as they are` : '';
+    sentences.push(`${plural(flaky, 'flaky case')} found in shuffled reruns${detail}.`);
+  }
   const fewerAssertions = workspace.existingTestsChanged.filter((change) => change.fewerAssertions).length;
   if (workspace.existingTestsChanged.length > 0) {
     const detail = fewerAssertions > 0 ? `, ${fewerAssertions} with fewer assertions` : '';

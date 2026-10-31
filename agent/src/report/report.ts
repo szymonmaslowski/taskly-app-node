@@ -1,6 +1,7 @@
 import type { CoverageByFile, FileCoverage } from '../analyze/coverage.ts';
-import type { ChangeOutsideCases, PullRequestResult, RunMode, VerifyResult, WorkspaceResult } from '../orchestrator.ts';
+import type { ChangeOutsideCases, FlakyResult, PullRequestResult, RunMode, VerifyResult, WorkspaceResult } from '../orchestrator.ts';
 import type { StageUsage } from '../run-stage.ts';
+import { matchesCaseName } from '../tests/test-changes.ts';
 
 export type Fraction = { covered: number; total: number };
 
@@ -22,6 +23,12 @@ export type ExistingTestChange = {
   expectsBefore: number;
   expectsAfter: number;
   fewerAssertions: boolean;
+};
+
+export type FlakyCase = {
+  testFile: string;
+  name: string;
+  outcome: 'removed' | 'restored' | 'file restored' | 'left as is';
 };
 
 export type WorkspaceReport = {
@@ -47,6 +54,7 @@ export type WorkspaceReport = {
   revertedCases: { testFile: string; name: string }[];
   revertedFiles: string[];
   remainingFailures: { testFile: string; cases: string[] }[];
+  flakyCases: FlakyCase[];
   failedBatches: { module: string; reason: string }[];
   fixerNotes: string[];
 };
@@ -106,6 +114,17 @@ function usedSkills(result: WorkspaceResult) {
   return [...new Set(skillNames)];
 }
 
+function describeFlakyCases({ cases, removedCases, revertedCases, revertedFiles }: FlakyResult) {
+  const touched = (list: { testFile: string; name: string }[], flakyCase: { testFile: string; name: string }) =>
+    list.some((entry) => entry.testFile === flakyCase.testFile && matchesCaseName(entry.name, flakyCase.name));
+  return cases.map((flakyCase): FlakyCase => {
+    if (revertedFiles.includes(flakyCase.testFile)) return { ...flakyCase, outcome: 'file restored' };
+    if (touched(removedCases, flakyCase)) return { ...flakyCase, outcome: 'removed' };
+    if (touched(revertedCases, flakyCase)) return { ...flakyCase, outcome: 'restored' };
+    return { ...flakyCase, outcome: 'left as is' };
+  });
+}
+
 export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {
   const batches = result.batches;
   return {
@@ -155,6 +174,7 @@ export function buildWorkspaceReport(result: WorkspaceResult): WorkspaceReport {
     remainingFailures: batches.flatMap((batch) =>
       batch.remainingFailures.map((failure) => ({ testFile: failure.testFile, cases: failure.failingCases.map((failingCase) => failingCase.fullName) })),
     ),
+    flakyCases: describeFlakyCases(result.flaky),
     failedBatches: batches.flatMap((batch) => (batch.error === undefined ? [] : [{ module: batch.module, reason: batch.error }])),
     fixerNotes: batches.flatMap((batch) => batch.fixerNotes),
   };

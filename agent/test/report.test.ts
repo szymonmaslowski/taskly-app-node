@@ -56,6 +56,7 @@ const result: WorkspaceResult = {
     },
   ],
   changedOutsideCases: [],
+  flaky: { cases: [], removedCases: [], revertedCases: [], revertedFiles: [] },
   usages: [usage, { ...usage, costUsd: 0.2 }],
 };
 
@@ -127,6 +128,25 @@ describe('buildRunReport', () => {
     const report = buildRunReport([changed]);
     expect(renderMarkdownReport(report)).toContain('`backend/tests/fixture.ts` **shared fixture or setup**');
     expect(buildSummary(report)).toContain('1 existing test file changed outside its cases, 1 of them shared fixtures or setup; check those too.');
+  });
+
+  it('reports flaky cases with what the agent did to each', () => {
+    const flaky: WorkspaceResult = {
+      ...result,
+      flaky: {
+        cases: [
+          { testFile: 'backend/tests/health.test.ts', name: 'health reports ok' },
+          { testFile: 'backend/tests/router.test.ts', name: 'router lists tasks' },
+        ],
+        removedCases: [{ testFile: 'backend/tests/health.test.ts', name: 'health reports ok' }],
+        revertedCases: [],
+        revertedFiles: [],
+      },
+    };
+    const report = buildRunReport([flaky]);
+    expect(report.workspaces[0].flakyCases.map((flakyCase) => flakyCase.outcome)).toEqual(['removed', 'left as is']);
+    expect(renderMarkdownReport(report)).toContain('- `backend/tests/router.test.ts`: router lists tasks: left as is');
+    expect(buildSummary(report)).toContain('2 flaky cases found in shuffled reruns; 1 of them existing tests the agent left as they are.');
   });
 
   it('renders the changed existing tests before the new cases', () => {

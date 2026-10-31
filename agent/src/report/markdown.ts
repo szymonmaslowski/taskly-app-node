@@ -96,6 +96,16 @@ function renderWorkspace(workspace: WorkspaceReport) {
       lines.push(`\`${escapeCode(file.testFile)}\``, list(file.names, escapeMarkdown), '');
     }
   }
+  if (workspace.flakyCases.length > 0) {
+    lines.push(
+      '### Flaky cases',
+      '',
+      'These both passed and failed across shuffled reruns. The agent removes its own new cases and restores changed ones; existing cases stay as they are.',
+      '',
+      list(workspace.flakyCases, (flakyCase) => `\`${escapeCode(flakyCase.testFile)}\`: ${escapeMarkdown(flakyCase.name)}: ${flakyCase.outcome}`),
+      '',
+    );
+  }
   const notDone = [
     ...workspace.failedBatches.map((failed) => `batch \`${escapeCode(failed.module)}\` failed and was rolled back: ${escapeMarkdown(failed.reason)}`),
     ...workspace.remainingFailures.map((failure) => `still failing in \`${escapeCode(failure.testFile)}\`: ${failure.cases.map(escapeMarkdown).join('; ')}`),

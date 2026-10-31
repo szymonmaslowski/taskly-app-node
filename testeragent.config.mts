@@ -61,5 +61,7 @@ export default defineConfig({
     fixAttempts: 3,
     // Fixers share one writable staging copy, so two of them could edit the same fixture at once.
     agentParallelism: 1,
+    // Extra shuffled runs of the changed test files; a case that both passes and fails across them is flaky.
+    flakyReruns: 2,
   },
 });

@@ -17,7 +17,7 @@ import { buildImages } from './sandbox/images.ts';
 import { checkRepositoryThresholds, installRunnerWorkspace, prepareRunnerWorkspace, runInRunner, runTests, runTypecheck } from './sandbox/runner.ts';
 import { createStagingCopy, diffStagingCopy, findDisallowedChanges, type StagingChanges, type StagingManifest } from './sandbox/staging.ts';
 import { applyStagingToRepository, syncStagingToRunner } from './sandbox/sync.ts';
-import type { TestCaseResult } from './sandbox/test-results.ts';
+import type { TestCaseResult, TestCaseStatus } from './sandbox/test-results.ts';
 import { loadSkill, loadSkillReference, loadTestingRules, type Skill } from './skills.ts';
 import { applyReview, numberCases, partitionPlannedCases, type CaseDecision } from './stages/plan.ts';
 import { buildFixPrompt, buildPlanPrompt, buildReviewPrompt, buildWritePrompt, type FileFailures } from './stages/prompts.ts';
@@ -95,12 +95,20 @@ export type WorkspaceResult = {
   testFileChanges: TestFileChanges[];
   changedOutsideCases: ChangeOutsideCases[];
   pullRequest?: PullRequestResult;
+  flaky: FlakyResult;
   usages: StageUsage[];
 };
 
 export type BrokenTest = {
   testFile: string;
   outcome: 'updated by the agent' | 'passes now' | 'left failing';
+};
+
+export type FlakyResult = {
+  cases: { testFile: string; name: string }[];
+  removedCases: { testFile: string; name: string }[];
+  revertedCases: { testFile: string; name: string }[];
+  revertedFiles: string[];
 };
 
 export type PullRequestResult = {
@@ -435,6 +443,54 @@ async function cleanUpRemainingFailures(context: WorkspaceContext, batchStart: B
   return { ...cleanup, remainingFailures: remaining };
 }
 
+async function listChangedTestFiles(context: WorkspaceContext) {
+  const isTestFile = createMatcher(context.workspace.root, context.workspace.tests);
+  const changes = await diffStagingCopy(context.directories.staging, context.manifest);
+  return [...changes.added, ...changes.modified].filter((changedPath) => isTestFile(changedPath));
+}
+
+async function findFlakyCases(context: WorkspaceContext) {
+  const { workspace, directories, logger, loop } = context;
+  const testFiles = await listChangedTestFiles(context);
+  if (loop.flakyReruns === 0 || testFiles.length === 0) return [];
+  logger.startStep(`flaky check · ${loop.flakyReruns + 1} shuffled runs`);
+  const prefix = `${workspace.root}/`;
+  const outcomes = new Map<string, { testFile: string; name: string; statuses: Set<TestCaseStatus> }>();
+  for (let run = 0; run <= loop.flakyReruns; run += 1) {
+    const testRun = await runTests({
+      workspaceDirectory: directories.runner,
+      outputDirectory: directories.output,
+      workspace,
+      testFiles: testFiles.map((testFile) => testFile.slice(prefix.length)),
+      shuffle: true,
+    });
+    for (const testCase of testRun.cases) {
+      const key = `${testCase.file}\0${testCase.fullName}`;
+      const outcome = outcomes.get(key) ?? { testFile: `${prefix}${testCase.file}`, name: testCase.fullName, statuses: new Set() };
+      outcome.statuses.add(testCase.status);
+      outcomes.set(key, outcome);
+    }
+  }
+  const flaky = [...outcomes.values()].filter((outcome) => outcome.statuses.has('passed') && outcome.statuses.has('failed'));
+  for (const flakyCase of flaky) logger.untrusted(`flaky ${flakyCase.testFile}: ${flakyCase.name}`);
+  logger.endStep(`${flaky.length} flaky cases`);
+  return flaky.map(({ testFile, name }) => ({ testFile, name }));
+}
+
+// Flaky cases follow the clean-up rule for failures: the agent's new cases go, its changed cases go back, the developer's stay and are reported.
+async function removeFlakyCases(context: WorkspaceContext): Promise<FlakyResult> {
+  const cases = await findFlakyCases(context);
+  if (cases.length === 0) return { cases, removedCases: [], revertedCases: [], revertedFiles: [] };
+  const failures: FileFailures[] = [...new Set(cases.map((flakyCase) => flakyCase.testFile))].map((testFile) => ({
+    testFile,
+    failingCases: cases.filter((flakyCase) => flakyCase.testFile === testFile).map((flakyCase) => ({ fullName: flakyCase.name, failureMessages: [] })),
+    typecheckErrors: [],
+    bannedPatterns: [],
+  }));
+  const { removedCases, revertedCases, revertedFiles } = await cleanUpRemainingFailures(context, new Map(), failures);
+  return { cases, removedCases, revertedCases, revertedFiles };
+}
+
 function emptyBatchResult(module: string): BatchResult {
   return {
     module,
@@ -697,6 +753,7 @@ export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, 
         };
         const batchResults: BatchResult[] = [];
         for (const batch of batches) batchResults.push(await processBatchOrRollBack(context, batch));
+        const flaky = await removeFlakyCases(context);
         await formatChangedFiles(context);
 
         logger.startStep(`verify · ${name}`);
@@ -754,6 +811,7 @@ export async function runAgent({ trustedRepositoryRoot, repositoryRoot, logger, 
             leftOutByCap: pullRequestScope.leftOutByCap,
             deletedSources: pullRequestScope.deletedSources,
           },
+          flaky,
           usages: context.usages,
         });
       } finally {

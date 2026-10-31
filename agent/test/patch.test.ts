@@ -45,7 +45,7 @@ const config = configSchema.parse({
     },
   },
   stages: { plan: stage, planReview: stage, write: stage, fix: stage, lastFix: stage },
-  loop: { planRounds: 2, outputAttempts: 2, fixAttempts: 3, agentParallelism: 1 },
+  loop: { planRounds: 2, outputAttempts: 2, fixAttempts: 3, agentParallelism: 1, flakyReruns: 2 },
 });
 
 async function createHead() {
