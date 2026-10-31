@@ -73,8 +73,8 @@ export function createBufferedLogger(now: () => number = Date.now) {
       stepStartedAt = now();
       calls.push({ method: 'startStep', text });
     },
-    endStep(text) {
-      calls.push({ method: 'endStep', text, durationMilliseconds: now() - stepStartedAt });
+    endStep(text, durationMilliseconds) {
+      calls.push({ method: 'endStep', text, durationMilliseconds: durationMilliseconds ?? now() - stepStartedAt });
     },
     info: (text) => calls.push({ method: 'info', text }),
     untrusted: (text) => calls.push({ method: 'untrusted', text }),

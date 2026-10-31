@@ -48,4 +48,16 @@ describe('createBufferedLogger', () => {
     buffered.flush(logger);
     expect(lines).toEqual(['▸ fix · attempt 1/4', '  backend/tests/health.test.ts', '  1 files changed (2.0s)']);
   });
+
+  it('keeps the original duration when one buffer is flushed into another', () => {
+    let clock = 0;
+    const inner = createBufferedLogger(() => (clock += 2000));
+    inner.logger.startStep('plan · backend/src/api');
+    inner.logger.endStep('3 cases planned');
+    const outer = createBufferedLogger(() => (clock += 60_000));
+    inner.flush(outer.logger);
+    const { lines, logger } = collect(false);
+    outer.flush(logger);
+    expect(lines).toEqual(['▸ plan · backend/src/api', '  3 cases planned (2.0s)']);
+  });
 });
